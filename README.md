@@ -1,3 +1,3 @@
-#Min Internet Relay Chat
+# Min Internet Relay Chat
 
 A very lightweight single server IRC application
