@@ -3,13 +3,14 @@ package main
 import (
 	"fmt"
 	"net"
+	"os"
 	"time"
 )
 
 const LISTEN_PORT = ":6667"
 
 type client struct {
-	ip      Addr
+	ip      net.Addr
 	nick    string
 	timeout time.Time
 }
@@ -32,8 +33,11 @@ func main() {
 
 	if err != nil {
 		// handle error
-		fmt.Print("Problem connecting...")
+		fmt.Print("Server start failed...\n")
+		fmt.Printf("ERROR: %v\n", err)
+		os.Exit(-1)
 	}
+	fmt.Print("Server has started.\n")
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
