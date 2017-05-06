@@ -18,14 +18,16 @@ type client struct {
 // Handles the connection
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
-	buf := make([]byte, 1024)
-	conn.Read(buf)
-	client_port := conn.RemoteAddr()
-	fmt.Printf("%s\n", client_port)
-	fmt.Printf("Client %s connected!\n", buf)
-	daytime := time.Now().String()
-	conn.Write([]byte(daytime))
-	conn.Write([]byte(buf))
+	for {
+		buf := make([]byte, 1024)
+		conn.Read(buf)
+		client_port := conn.RemoteAddr()
+		fmt.Printf("%s\n", client_port)
+		fmt.Printf("Client %s connected!\n", buf)
+		daytime := time.Now().String()
+		conn.Write([]byte(daytime))
+		conn.Write([]byte(buf))
+	}
 }
 
 func main() {
