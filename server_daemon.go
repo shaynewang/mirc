@@ -23,7 +23,7 @@ func handleConnection(conn net.Conn) {
 		conn.Read(buf)
 		client_port := conn.RemoteAddr()
 		fmt.Printf("%s\n", client_port)
-		fmt.Printf("Client %s connected!\n", buf)
+		fmt.Printf("Client says %s\n", buf)
 		daytime := time.Now().String()
 		conn.Write([]byte(daytime))
 		conn.Write([]byte(buf))
