@@ -8,6 +8,7 @@ import (
 const (
 	CONNECTION_SUCCESS        = 1
 	CLIENT_REQUEST_CONNECTION = 100
+	CLIENT_CHANGE_NICK        = 108
 )
 
 type Client struct {
