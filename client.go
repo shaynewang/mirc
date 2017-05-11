@@ -42,14 +42,15 @@ func main() {
 		con.changeNick()
 		opcode, msg = con.getMsg()
 	}
+	fmt.Printf("Connected\n")
 
 	for {
 		reader := bufio.NewReader(os.Stdin)
 		text, _ := reader.ReadString('\n')
 		//fmt.Fprintf(conn, text+"\n")
-		con.sendMsg(CLIENT_SEND_PUB_MESSAGE, text+"\n")
+		con.sendMsg(CLIENT_SEND_PUB_MESSAGE, text)
 		//message, _ := bufio.NewReader(conn).ReadString('\n')
-		_, message := con.getMsg()
-		fmt.Print("Message from server: " + message)
+		//_, message := con.getMsg()
+		//fmt.Print("Message from server: " + message)
 	}
 }

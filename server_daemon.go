@@ -45,16 +45,7 @@ func handleConnection(conn net.Conn) {
 		enc:  *gob.NewEncoder(conn),
 		dec:  *gob.NewDecoder(conn),
 	}
-	//dec := gob.NewDecoder(conn)
-	//buf := new(Message)
-	//err := dec.Decode(&buf)
-	//if err != nil {
-	//	conn.Close()
-	//	return
-	//}
-	//ocode := buf.Header.Op_code
 	opcode, nick := con.getMsg()
-	//nick := buf.Body
 	client_ip := con.conn.RemoteAddr()
 	if opcode != 100 {
 		// Drop the invalid connection
@@ -75,21 +66,21 @@ func handleConnection(conn net.Conn) {
 			return
 		}
 	}
+	con.sendMsg(CONNECTION_SUCCESS, "Connection established")
 	fmt.Printf("%s has connected\n", nick)
 	fmt.Printf("ip: %s\n", activeClients[nick].ip)
 	for {
-		//buf := make([]byte, 1024)
-		//conn.Read(buf)
-		err, message := con.getMsg()
-		if err == ERROR {
+		opcode, message := con.getMsg()
+		if opcode == ERROR {
 			conn.Close()
 			removeClient(nick, activeClients)
+			fmt.Printf("%s has disconnected\n", nick)
 			return
 		}
-		fmt.Printf("%s\n", client_ip)
-		fmt.Printf("%s says %s\n", nick, message)
+		if opcode == CLIENT_SEND_PUB_MESSAGE {
+			fmt.Printf("%s says %s\n", nick, message)
+		}
 		//daytime := time.Now().String()
-		//conn.Write([]byte(buf))
 	}
 }
 
