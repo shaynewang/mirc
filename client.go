@@ -25,7 +25,8 @@ func (c *connection) changeNick() {
 	c.sendMsg(CLIENT_CHANGE_NICK, nick)
 }
 
-func main() {
+//Run will run client
+func Run() {
 	// Initialize connection
 	fmt.Printf("Current server: %s\n", SERVER)
 	conn, _ := net.Dial("tcp", SERVER)
@@ -36,11 +37,11 @@ func main() {
 	}
 	con.requestToConnect()
 	// request new nickname if exisit in server
-	opcode, msg := con.getMsg()
-	for opcode == CONNECTION_FAILURE {
+	opCode, msg := con.getMsg()
+	for opCode == CONNECTION_FAILURE {
 		fmt.Printf("Cannot connect: %s\n", msg)
 		con.changeNick()
-		opcode, msg = con.getMsg()
+		opCode, msg = con.getMsg()
 	}
 	fmt.Printf("Connected\n")
 

@@ -6,7 +6,7 @@ import (
 	"net"
 )
 
-// Default server ip
+// SERVER is the default server ip and port number
 // TODO: use config.yaml file for server ip address
 const SERVER = "127.0.0.1:6667"
 
@@ -25,21 +25,21 @@ func (c *connection) initializeConnection() {
 	}
 }
 
-func (c *connection) sendMsg(opcode int16, msg_body string) error {
+func (c *connection) sendMsg(opCode int16, msgBody string) error {
 	//fmt.Printf("DEBUG: sendMsg opcode %d\n", opcode)
 	//fmt.Printf("DEBUG: sendMsg msg_body %s\n", msg_body)
 	msg := new(Message)
-	msg.Header = Msg_header{Op_code: opcode, Msg_len: len(msg_body)}
-	msg.Body = msg_body
+	msg.Header = MsgHeader{OpCode: opCode, MsgLen: len(msgBody)}
+	msg.Body = msgBody
 	err := c.enc.Encode(&msg)
 	return err
 }
 
 func (c *connection) getMsg() (int16, string) {
-	recv_msg := new(Message)
-	err := c.dec.Decode(&recv_msg)
+	recvMsg := new(Message)
+	err := c.dec.Decode(&recvMsg)
 	if err != nil {
 		return ERROR, ""
 	}
-	return recv_msg.Header.Op_code, recv_msg.Body
+	return recvMsg.Header.OpCode, recvMsg.Body
 }

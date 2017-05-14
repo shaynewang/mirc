@@ -45,22 +45,22 @@ func handleConnection(conn net.Conn) {
 		enc:  *gob.NewEncoder(conn),
 		dec:  *gob.NewDecoder(conn),
 	}
-	opcode, nick := con.getMsg()
-	client_ip := con.conn.RemoteAddr()
-	if opcode != 100 {
+	opCode, nick := con.getMsg()
+	clientIP := con.conn.RemoteAddr()
+	if opCode != 100 {
 		// Drop the invalid connection
 		conn.Close()
 		return
 	}
 
-	for addClient(nick, client_ip, activeClients) < 0 {
+	for addClient(nick, clientIP, activeClients) < 0 {
 		// If nickname exists then client will be asked
 		// to change
 		con.sendMsg(CONNECTION_FAILURE, "nickname exists")
-		opcode, msg := con.getMsg()
-		if opcode == CLIENT_CHANGE_NICK {
+		opCode, msg := con.getMsg()
+		if opCode == CLIENT_CHANGE_NICK {
 			nick = msg
-		} else if opcode < 0 {
+		} else if opCode < 0 {
 			// Client quit unexpectly
 			con.conn.Close()
 			return
@@ -70,14 +70,14 @@ func handleConnection(conn net.Conn) {
 	fmt.Printf("%s has connected\n", nick)
 	fmt.Printf("ip: %s\n", activeClients[nick].ip)
 	for {
-		opcode, message := con.getMsg()
-		if opcode == ERROR {
+		opCode, message := con.getMsg()
+		if opCode == ERROR {
 			conn.Close()
 			removeClient(nick, activeClients)
 			fmt.Printf("%s has disconnected\n", nick)
 			return
 		}
-		if opcode == CLIENT_SEND_PUB_MESSAGE {
+		if opCode == CLIENT_SEND_PUB_MESSAGE {
 			fmt.Printf("%s says %s\n", nick, message)
 		}
 		//daytime := time.Now().String()

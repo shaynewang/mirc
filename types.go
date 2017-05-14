@@ -32,12 +32,13 @@ type Client struct {
 	timeout time.Time
 }
 
-type Msg_header struct {
-	Op_code int16
-	Msg_len int
+type MsgHeader struct {
+	OpCode  int16
+	RecNick string
+	MsgLen  int
 }
 
 type Message struct {
-	Header Msg_header
+	Header MsgHeader
 	Body   string
 }
