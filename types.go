@@ -1,4 +1,4 @@
-package main
+package mirc
 
 import (
 	"net"
@@ -27,9 +27,9 @@ const (
 )
 
 type Client struct {
-	ip      net.Addr
-	nick    string
-	timeout time.Time
+	Ip      net.Addr
+	Nick    string
+	Timeout time.Time
 }
 
 type MsgHeader struct {

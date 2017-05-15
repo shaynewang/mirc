@@ -1,43 +1,29 @@
-package main
+package mirc
 
 import (
 	"encoding/gob"
-	"log"
 	"net"
 )
 
-// SERVER is the default server ip and port number
-// TODO: use config.yaml file for server ip address
-const SERVER = "127.0.0.1:6667"
-
-type connection struct {
-	conn net.Conn
-	enc  gob.Encoder
-	dec  gob.Decoder
+type Connection struct {
+	Conn net.Conn
+	Enc  gob.Encoder
+	Dec  gob.Decoder
 }
 
-func (c *connection) initializeConnection() {
-	var err error
-	c.conn, err = net.Dial("tcp", SERVER)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-}
-
-func (c *connection) sendMsg(opCode int16, msgBody string) error {
+func (c *Connection) SendMsg(opCode int16, msgBody string) error {
 	//fmt.Printf("DEBUG: sendMsg opcode %d\n", opcode)
 	//fmt.Printf("DEBUG: sendMsg msg_body %s\n", msg_body)
 	msg := new(Message)
 	msg.Header = MsgHeader{OpCode: opCode, MsgLen: len(msgBody)}
 	msg.Body = msgBody
-	err := c.enc.Encode(&msg)
+	err := c.Enc.Encode(&msg)
 	return err
 }
 
-func (c *connection) getMsg() (int16, string) {
+func (c *Connection) GetMsg() (int16, string) {
 	recvMsg := new(Message)
-	err := c.dec.Decode(&recvMsg)
+	err := c.Dec.Decode(&recvMsg)
 	if err != nil {
 		return ERROR, ""
 	}
