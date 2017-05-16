@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/gob"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"time"
@@ -18,35 +17,26 @@ const TIMEOUT = 10
 // Mapping of client's nickname to client object
 var activeClients = map[string]mirc.Client{}
 
-func newServerConnection(server string) *mirc.Connection {
-	var err error
-	conn, err := net.Dial("tcp", server)
-	if err != nil {
-		log.Println(err)
-		return nil
-	}
-	con := mirc.Connection{
-		Conn: conn,
-		Enc:  *gob.NewEncoder(conn),
-		Dec:  *gob.NewDecoder(conn),
-	}
-	return &con
-}
-
-func addClient(cnick string, cip net.Addr, clientMap map[string]mirc.Client) int {
+// add client to the client list
+func addClient(cnick string, conn net.Conn, clientMap map[string]mirc.Client) int {
 	if _, ok := clientMap[cnick]; ok {
 		//  Cannot add duplicated nickname
 		return -1
 	}
+
 	newClient := mirc.Client{
-		Ip:      cip,
+		Ip:      conn.RemoteAddr(),
 		Nick:    cnick,
 		Timeout: time.Now().Add(time.Second * time.Duration(TIMEOUT)),
-	}
+		Socket: &mirc.Connection{
+			Conn: conn,
+			Enc:  *gob.NewEncoder(conn),
+			Dec:  *gob.NewDecoder(conn)}}
 	clientMap[cnick] = newClient
 	return 0
 }
 
+// remove client from the client list
 func removeClient(cnick string, clientMap map[string]mirc.Client) int {
 	if _, ok := clientMap[cnick]; ok {
 		delete(clientMap, cnick)
@@ -55,7 +45,22 @@ func removeClient(cnick string, clientMap map[string]mirc.Client) int {
 	return -1
 }
 
-// Handles the Connection
+//addRoomHandler
+func addRoomHandler(rname string) {
+	return
+}
+
+func rallyMsg(from string, m *mirc.Message) {
+	m.Header.Sender = from
+	fmt.Printf("sender %s\n", m.Header.Sender)
+	fmt.Printf("recever %s\n", m.Header.Recever)
+	activeClients[m.Header.Recever].Socket.SendMsg(mirc.SERVER_TELL_MESSAGE, from, m.Body)
+	//messageQ = append(messageQ, *m)I
+	return
+}
+
+// when a new client connects adds it to the list, then initialize a message queue
+// for that client.
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	con := mirc.Connection{
@@ -63,40 +68,47 @@ func handleConnection(conn net.Conn) {
 		Enc:  *gob.NewEncoder(conn),
 		Dec:  *gob.NewDecoder(conn),
 	}
-	opCode, nick := con.GetMsg()
-	clientIP := con.Conn.RemoteAddr()
+	opCode, msg := con.GetMsg()
+	nick := msg.Body
+	//clientIP := con.Conn.RemoteAddr()
 	if opCode != 100 {
-		// Drop the invalid Connection
-		conn.Close()
+		// Silently drop the invalid Connection
 		return
 	}
 
-	for addClient(nick, clientIP, activeClients) < 0 {
+	for addClient(nick, conn, activeClients) < 0 {
 		// If nickname exists then client will be asked
 		// to change
-		con.SendMsg(mirc.CONNECTION_FAILURE, "nickname exists")
-		opCode, msg := con.GetMsg()
+		con.SendMsg(mirc.CONNECTION_FAILURE, nick, "nickname exists")
+		opCode, msg = con.GetMsg()
 		if opCode == mirc.CLIENT_CHANGE_NICK {
-			nick = msg
+			nick = msg.Body
 		} else if opCode < 0 {
 			// Client quit unexpectly
 			con.Conn.Close()
 			return
 		}
 	}
-	con.SendMsg(mirc.CONNECTION_SUCCESS, "Connection established")
+	con.SendMsg(mirc.CONNECTION_SUCCESS, nick, "Connection established")
+
 	fmt.Printf("%s has connected\n", nick)
 	fmt.Printf("ip: %s\n", activeClients[nick].Ip)
 	for {
-		opCode, message := con.GetMsg()
+		if len(activeClients[nick].MsgQ) != 0 {
+			con.SendMsg(mirc.SERVER_TELL_MESSAGE, nick, activeClients[nick].MsgQ[0].Body)
+			//fmt.Printf("%s", con.MsgQ[0].Body)
+		}
+		opCode, msg = con.GetMsg()
 		if opCode == mirc.ERROR {
-			conn.Close()
+			con.Conn.Close()
 			removeClient(nick, activeClients)
 			fmt.Printf("%s has disconnected\n", nick)
 			return
 		}
 		if opCode == mirc.CLIENT_SEND_PUB_MESSAGE {
-			fmt.Printf("%s says %s\n", nick, message)
+			fmt.Printf("%s says %s\n", nick, msg.Body)
+		} else if opCode == mirc.CLIENT_SEND_MESSAGE {
+			rallyMsg(nick, msg)
 		}
 		//daytime := time.Now().String()
 	}

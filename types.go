@@ -1,6 +1,7 @@
 package mirc
 
 import (
+	"encoding/gob"
 	"net"
 	"time"
 )
@@ -26,15 +27,29 @@ const (
 	ERROR                     = 1000
 )
 
+type Connection struct {
+	Conn net.Conn
+	Enc  gob.Encoder
+	Dec  gob.Decoder
+}
+
 type Client struct {
 	Ip      net.Addr
 	Nick    string
 	Timeout time.Time
+	Socket  *Connection
+	MsgQ    []Message
+}
+
+type Room struct {
+	Name    string
+	Members []Client
 }
 
 type MsgHeader struct {
 	OpCode  int16
-	RecNick string
+	Sender  string
+	Recever string
 	MsgLen  int
 }
 

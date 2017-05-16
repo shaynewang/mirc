@@ -16,11 +16,36 @@ import (
 // TODO: use config.yaml file for server ip address
 const SERVER = "127.0.0.1:6667"
 
+type client struct {
+	ip     net.Addr
+	socket *mirc.Connection
+}
+
+func newClient(server string) *client {
+	conn, err := net.Dial("tcp", server)
+	if err != nil {
+		log.Println(err)
+		// TODO: add error handleing, maybe ask for new server IP
+		os.Exit(-1)
+	}
+	con := mirc.Connection{
+		Conn: conn,
+		Enc:  *gob.NewEncoder(conn),
+		Dec:  *gob.NewDecoder(conn),
+	}
+	return &client{
+		ip:     conn.LocalAddr(),
+		socket: &con,
+	}
+
+}
+
 func newClientConnection(server string) *mirc.Connection {
 	var err error
 	conn, err := net.Dial("tcp", server)
 	if err != nil {
 		log.Println(err)
+		// TODO: add error handleing, maybe ask for new server IP
 		os.Exit(-1)
 	}
 	con := mirc.Connection{
@@ -31,12 +56,12 @@ func newClientConnection(server string) *mirc.Connection {
 	return &con
 }
 
-func requestToConnect(c *mirc.Connection) {
+func (c *client) requestToConnect() {
 	fmt.Print("Input your nickname:")
 	reader := bufio.NewReader(os.Stdin)
 	nick, _ := reader.ReadString('\n')
 	nick = strings.Replace(nick, "\n", "", -1)
-	c.SendMsg(mirc.CLIENT_REQUEST_CONNECTION, nick)
+	c.SendMsg(mirc.CLIENT_REQUEST_CONNECTION, nick, nick)
 }
 
 func changeNick(c *mirc.Connection) {
@@ -44,11 +69,12 @@ func changeNick(c *mirc.Connection) {
 	reader := bufio.NewReader(os.Stdin)
 	nick, _ := reader.ReadString('\n')
 	nick = strings.Replace(nick, "\n", "", -1)
-	c.SendMsg(mirc.CLIENT_CHANGE_NICK, nick)
+	c.SendMsg(mirc.CLIENT_CHANGE_NICK, nick, nick)
 }
 
 //Run will run client
 func main() {
+	client := mirc.Client{}
 	// Initialize Connection
 	fmt.Printf("Current server: %s\n", SERVER)
 	con := newClientConnection(SERVER)
@@ -62,7 +88,7 @@ func main() {
 	// request new nickname if exisit in server
 	opCode, msg := con.GetMsg()
 	for opCode == mirc.CONNECTION_FAILURE {
-		fmt.Printf("Cannot connect: %s\n", msg)
+		fmt.Printf("Cannot connect: %s\n", msg.Body)
 		changeNick(con)
 		opCode, msg = con.GetMsg()
 	}
@@ -71,10 +97,16 @@ func main() {
 	for {
 		reader := bufio.NewReader(os.Stdin)
 		text, _ := reader.ReadString('\n')
+		recever := "shayne"
 		//fmt.Fprintf(conn, text+"\n")
-		con.SendMsg(mirc.CLIENT_SEND_PUB_MESSAGE, text)
+		//go con.SendMsg(mirc.CLIENT_SEND_PUB_MESSAGE, text)
+		con.SendMsg(mirc.CLIENT_SEND_MESSAGE, nick, recever, text)
+		opCode, msg = con.GetMsg()
+		if opCode == mirc.SERVER_TELL_MESSAGE {
+			fmt.Printf("Message from %s: %s", msg.Header.Sender, msg.Body)
+		}
+
 		//message, _ := bufio.NewReader(conn).ReadString('\n')
 		//_, message := con.getMsg()
-		//fmt.Print("Message from server: " + message)
 	}
 }
