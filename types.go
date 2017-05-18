@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// A list of opCodes
 const (
 	CONNECTION_SUCCESS        = 1
 	CONNECTION_FAILURE        = 2
@@ -27,32 +28,38 @@ const (
 	ERROR                     = 1000
 )
 
+// Connection type contains the connection object
+// also encoder and decoder for passing gob objects
 type Connection struct {
 	Conn net.Conn
 	Enc  gob.Encoder
 	Dec  gob.Decoder
 }
 
+// Client type contains information of clients in server
 type Client struct {
-	Ip      net.Addr
+	IP      net.Addr
 	Nick    string
 	Timeout time.Time
 	Socket  *Connection
 	MsgQ    []Message
 }
 
+// Room type contains the room name and the list of memebers
 type Room struct {
 	Name    string
 	Members []Client
 }
 
+// MsgHeader contains header information of messages
 type MsgHeader struct {
-	OpCode  int16
-	Sender  string
-	Recever string
-	MsgLen  int
+	OpCode   int16
+	Sender   string
+	Receiver string
+	MsgLen   int
 }
 
+// Message contain the header object as well as the body of a message
 type Message struct {
 	Header MsgHeader
 	Body   string

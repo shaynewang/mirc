@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/shaynewang/mirc"
 )
@@ -15,12 +16,11 @@ import (
 // SERVER is the default server ip and port number
 // TODO: use config.yaml file for server ip address
 const SERVER = "127.0.0.1:6667"
+const retries = 3
 
-type client struct {
-	ip     net.Addr
-	socket *mirc.Connection
-}
+type client mirc.Client
 
+// Initialize new client connection
 func newClient(server string) *client {
 	conn, err := net.Dial("tcp", server)
 	if err != nil {
@@ -33,11 +33,12 @@ func newClient(server string) *client {
 		Enc:  *gob.NewEncoder(conn),
 		Dec:  *gob.NewDecoder(conn),
 	}
-	return &client{
-		ip:     conn.LocalAddr(),
-		socket: &con,
+	new := client{
+		IP:     conn.LocalAddr(),
+		Socket: &con,
 	}
-
+	new.setNick()
+	return &new
 }
 
 func newClientConnection(server string) *mirc.Connection {
@@ -56,35 +57,82 @@ func newClientConnection(server string) *mirc.Connection {
 	return &con
 }
 
-func (c *client) requestToConnect() {
+// Sets nickname locally
+func (c *client) setNick() {
 	fmt.Print("Input your nickname:")
 	reader := bufio.NewReader(os.Stdin)
 	nick, _ := reader.ReadString('\n')
 	nick = strings.Replace(nick, "\n", "", -1)
-	c.SendMsg(mirc.CLIENT_REQUEST_CONNECTION, nick, nick)
+	c.Nick = nick
 }
 
-func changeNick(c *mirc.Connection) {
-	fmt.Print("Input your nickname:")
-	reader := bufio.NewReader(os.Stdin)
-	nick, _ := reader.ReadString('\n')
-	nick = strings.Replace(nick, "\n", "", -1)
-	c.SendMsg(mirc.CLIENT_CHANGE_NICK, nick, nick)
+// Prompt user to input to a nick name
+// Then update it with the server
+func (c *client) changeNick() {
+	var opCode int16
+	var msg *mirc.Message
+	opCode = mirc.CONNECTION_FAILURE
+	for opCode == mirc.CONNECTION_FAILURE {
+		c.setNick()
+		c.Socket.SendMsg(mirc.CLIENT_CHANGE_NICK, c.Nick, c.Nick)
+		opCode, msg = c.Socket.GetMsg()
+		fmt.Printf("Error: %s\n", msg.Body)
+	}
+}
+
+// send request to connect to the server
+func (c *client) requestToConnect() error {
+	var err error
+	for i := 0; i < retries; i++ {
+		fmt.Printf("Retry connecting... (%d/%d)\n", i, retries)
+		err = c.Socket.SendMsg(mirc.CLIENT_REQUEST_CONNECTION, c.Nick, c.Nick)
+		if err != nil {
+			fmt.Printf("%s\n", err)
+		}
+	}
+	return err
+}
+
+// send a request to create a room to server
+func (c *client) createRoom(room string) error {
+	return c.Socket.SendMsg(mirc.CLIENT_CREATE_ROOM, c.Nick, room)
+}
+
+// send a request to join a room to server
+func (c *client) joinRoom(room string) error {
+	return c.Socket.SendMsg(mirc.CLIENT_JOIN_ROOM, c.Nick, room)
+}
+
+// command loop
+func (c *client) commandLoop() {
+	for {
+		fmt.Print(">>> ")
+		reader := bufio.NewReader(os.Stdin)
+		cmdLine, _ := reader.ReadString('\n')
+		cmdLine = strings.Replace(cmdLine, "\n", "", -1)
+		args := strings.Fields(cmdLine)
+	}
+}
+
+// Handles a message
+func msgHandler(c *mirc.Connection) int {
+	opCode, msg := c.GetMsg()
+	daytime := time.Now().String()
+
+	if opCode == mirc.ERROR {
+		return -1
+	} else if opCode == mirc.SERVER_BROADCAST_MESSAGE {
+		fmt.Printf("%s []", mirc.GetTime())
+	}
+	return 0
 }
 
 //Run will run client
 func main() {
-	client := mirc.Client{}
+	client := newClient(SERVER)
 	// Initialize Connection
 	fmt.Printf("Current server: %s\n", SERVER)
-	con := newClientConnection(SERVER)
-	//conn, _ := net.Dial("tcp", SERVER)
-	//con := mirc.Connection{
-	//	conn: conn,
-	//	enc:  *gob.NewEncoder(conn),
-	//	dec:  *gob.NewDecoder(conn),
-	//}
-	requestToConnect(con)
+	client.requestToConnect()
 	// request new nickname if exisit in server
 	opCode, msg := con.GetMsg()
 	for opCode == mirc.CONNECTION_FAILURE {

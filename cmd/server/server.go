@@ -25,7 +25,7 @@ func addClient(cnick string, conn net.Conn, clientMap map[string]mirc.Client) in
 	}
 
 	newClient := mirc.Client{
-		Ip:      conn.RemoteAddr(),
+		IP:      conn.RemoteAddr(),
 		Nick:    cnick,
 		Timeout: time.Now().Add(time.Second * time.Duration(TIMEOUT)),
 		Socket: &mirc.Connection{
@@ -53,8 +53,8 @@ func addRoomHandler(rname string) {
 func rallyMsg(from string, m *mirc.Message) {
 	m.Header.Sender = from
 	fmt.Printf("sender %s\n", m.Header.Sender)
-	fmt.Printf("recever %s\n", m.Header.Recever)
-	activeClients[m.Header.Recever].Socket.SendMsg(mirc.SERVER_TELL_MESSAGE, from, m.Body)
+	fmt.Printf("recever %s\n", m.Header.Receiver)
+	activeClients[m.Header.Receiver].Socket.SendMsg(mirc.SERVER_TELL_MESSAGE, m.Header.Sender, m.Body)
 	//messageQ = append(messageQ, *m)I
 	return
 }
@@ -79,7 +79,7 @@ func handleConnection(conn net.Conn) {
 	for addClient(nick, conn, activeClients) < 0 {
 		// If nickname exists then client will be asked
 		// to change
-		con.SendMsg(mirc.CONNECTION_FAILURE, nick, "nickname exists")
+		con.SendMsg(mirc.CONNECTION_FAILURE, "server", "nickname exists")
 		opCode, msg = con.GetMsg()
 		if opCode == mirc.CLIENT_CHANGE_NICK {
 			nick = msg.Body
@@ -92,7 +92,7 @@ func handleConnection(conn net.Conn) {
 	con.SendMsg(mirc.CONNECTION_SUCCESS, nick, "Connection established")
 
 	fmt.Printf("%s has connected\n", nick)
-	fmt.Printf("ip: %s\n", activeClients[nick].Ip)
+	fmt.Printf("ip: %s\n", activeClients[nick].IP)
 	for {
 		if len(activeClients[nick].MsgQ) != 0 {
 			con.SendMsg(mirc.SERVER_TELL_MESSAGE, nick, activeClients[nick].MsgQ[0].Body)
