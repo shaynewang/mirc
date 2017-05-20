@@ -88,6 +88,9 @@ func (c *client) requestToConnect() error {
 		err = c.Socket.SendMsg(mirc.CLIENT_REQUEST_CONNECTION, c.Nick, c.Nick)
 		if err != nil {
 			fmt.Printf("%s\n", err)
+		} else {
+			fmt.Printf("Connected\n")
+			break
 		}
 	}
 	return err
@@ -103,6 +106,14 @@ func (c *client) joinRoom(room string) error {
 	return c.Socket.SendMsg(mirc.CLIENT_JOIN_ROOM, c.Nick, room)
 }
 
+// send a private message to a client
+func (c *client) sendPrivateMsg(receiver string, msgBody string) error {
+	msg := new(Message)
+	msg.Header = MsgHeader{OpCode: opCode, Sender: sender, MsgLen: len(msgBody)}
+	msg.Body = msgBody
+	return c.Socket.SendMsg(mirc.CLIENT_SEND_MESSAGE, c.Nick, room)
+}
+
 // command loop
 func (c *client) commandLoop() {
 	for {
@@ -110,7 +121,16 @@ func (c *client) commandLoop() {
 		reader := bufio.NewReader(os.Stdin)
 		cmdLine, _ := reader.ReadString('\n')
 		cmdLine = strings.Replace(cmdLine, "\n", "", -1)
-		args := strings.Fields(cmdLine)
+		args := strings.SplitN(cmdLine, " ", 1)
+		cmd := args[0]
+		if cmd == "\\create" {
+			c.createRoom(args[1])
+		} else if cmd == "\\join" {
+			c.joinRoom(args[1])
+		} else if cmd[0] == "@" {
+			c.sendPrivateMsg(cmd, args[1])
+		}
+
 	}
 }
 
@@ -140,7 +160,6 @@ func main() {
 		changeNick(con)
 		opCode, msg = con.GetMsg()
 	}
-	fmt.Printf("Connected\n")
 
 	for {
 		reader := bufio.NewReader(os.Stdin)
