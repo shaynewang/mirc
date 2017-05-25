@@ -1,7 +1,6 @@
 package mirc
 
 import (
-	"encoding/gob"
 	"net"
 	"time"
 )
@@ -12,6 +11,7 @@ const (
 	CONNECTION_FAILURE        = 2
 	CONNECTION_PING           = 3
 	CONNECTION_ACK            = 4
+	CONNECTION_CLOSED         = 5
 	CLIENT_REQUEST_CONNECTION = 100
 	CLIENT_CREATE_ROOM        = 101
 	CLIENT_JOIN_ROOM          = 102
@@ -29,11 +29,8 @@ const (
 )
 
 // Connection type contains the connection object
-// also encoder and decoder for passing gob objects
 type Connection struct {
-	Conn net.Conn
-	Enc  gob.Encoder
-	Dec  gob.Decoder
+	net.Conn
 }
 
 // Client type contains information of clients in server
@@ -42,13 +39,12 @@ type Client struct {
 	Nick    string
 	Timeout time.Time
 	Socket  *Connection
-	MsgQ    []Message
 }
 
 // Room type contains the room name and the list of memebers
 type Room struct {
 	Name    string
-	Members []Client
+	Members []string
 }
 
 // MsgHeader contains header information of messages
@@ -57,6 +53,7 @@ type MsgHeader struct {
 	Sender   string
 	Receiver string
 	MsgLen   int
+	Timeout  int
 }
 
 // Message contain the header object as well as the body of a message
