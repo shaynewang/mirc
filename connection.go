@@ -1,26 +1,14 @@
 package mirc
 
-import (
-	"encoding/gob"
-)
+import "encoding/gob"
 
-/*
-// SendMsg accepts OpCode, sender nick,receiver nick and message body as arguments then return
-// an error if send is not successful
-func (c *Connection) SendMsg_old(opCode int16, sender string, msgBody string) error {
-	msg := new(Message)
-	msg.Header = MsgHeader{OpCode: opCode, Sender: sender, MsgLen: len(msgBody)}
-	msg.Body = msgBody
-	err := c.Enc.Encode(&msg)
-	return err
-}
-*/
-
-// SendMsg passes a message to the server
+// SendMsg passes a message object to a reciever client
 func (c *Connection) SendMsg(msg *Message) error {
+	c.SetWriteDeadline(CalDeadline(10))
 	encoder := gob.NewEncoder(c)
 	err := encoder.Encode(&msg)
 	//err := c.Enc.Encode(&msg)
+	//	fmt.Printf("DEBUG: %s\n", err)
 	return err
 }
 

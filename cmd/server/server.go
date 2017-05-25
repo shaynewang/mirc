@@ -45,6 +45,10 @@ func addClient(cnick string, conn net.Conn, clientMap map[string]client) (*clien
 		Socket:  &mirc.Connection{conn},
 	}
 	clientMap[cnick] = newClient
+	r := rooms["public"]
+	r.addMember(cnick)
+	rooms["public"] = r
+	fmt.Printf("%s added to %s\n", cnick, r)
 	return &newClient, nil
 }
 
@@ -57,8 +61,21 @@ func addRoom(roomName string, nick string) error {
 	newRoom := room{Name: roomName}
 	newRoom.addMember(nick)
 	rooms[roomName] = newRoom
+	fmt.Printf("room %s created\n", roomName)
 	return nil
 
+}
+
+// add a client to a room
+func (c *client) joinRoom(roomName string) error {
+	if _, ok := rooms[roomName]; !ok {
+		return errors.New("room doesn't exist")
+	}
+	r := rooms[roomName]
+	r.addMember(c.Nick)
+	rooms[roomName] = r
+	fmt.Printf("%s added to %s\n", c.Nick, r)
+	return nil
 }
 
 // add member to a room
@@ -96,6 +113,19 @@ func (c *client) addRoomHandler(m *mirc.Message) {
 	return
 }
 
+// joinRoomHandler
+func (c *client) joinRoomHandler(m *mirc.Message) {
+	err := c.joinRoom(m.Body)
+	if err != nil {
+		c.Socket.SetWriteDeadline(mirc.CalDeadline(timeout))
+		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, err.Error()))
+	}
+	c.Socket.SetWriteDeadline(mirc.CalDeadline(timeout))
+	msgBody := "You joined " + m.Body + "!\n"
+	c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, msgBody))
+	return
+}
+
 // server passes rallied message to the receiver
 func rallyMsg(m *mirc.Message) {
 	if _, ok := activeClients[m.Header.Receiver]; !ok {
@@ -109,12 +139,33 @@ func rallyMsg(m *mirc.Message) {
 	return
 }
 
+// broadCastMsg sends passes message to all members in a room
+func broadCastMsg(m *mirc.Message) {
+	if _, ok := rooms[m.Header.Receiver]; !ok {
+		msgBody := "Room " + m.Header.Receiver + " doesn't exist.\n"
+		activeClients[m.Header.Sender].Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, m.Header.Sender, msgBody))
+		return
+	}
+	receiverList := rooms[m.Header.Receiver].Members
+	m.Header.OpCode = mirc.SERVER_BROADCAST_MESSAGE
+	fmt.Printf("%s list\n", receiverList)
+	for i := 0; i < len(receiverList); i++ {
+		c := receiverList[i]
+		if c != "server" {
+			fmt.Printf("client %s\n", c)
+			activeClients[c].Socket.SendMsg(m)
+		}
+	}
+	return
+
+}
+
 func (c *client) requestHandler() {
 	for {
 		c.Socket.Conn.SetReadDeadline(mirc.CalDeadline(inactiveTimeout))
 		opCode, msg := c.Socket.GetMsg()
 		if opCode == mirc.ERROR {
-			fmt.Printf("Server DEBUG: %s", opCode)
+			fmt.Printf("Server DEBUG: %s\n", opCode)
 			c.Socket.Conn.Close()
 			removeClient(c.Nick, activeClients)
 			c.Socket.SendMsg(newMsg(mirc.CONNECTION_CLOSED, c.Nick, "server has closed your connection"))
@@ -123,13 +174,15 @@ func (c *client) requestHandler() {
 		}
 		if opCode == mirc.CLIENT_SEND_PUB_MESSAGE {
 			fmt.Printf("%s says %s\n", c.Nick, msg.Body)
+			broadCastMsg(msg)
 		} else if opCode == mirc.CLIENT_SEND_MESSAGE {
-			fmt.Printf("DEBUG Rally message\n")
 			rallyMsg(msg)
 		} else if opCode == mirc.CONNECTION_PING {
 			continue
 		} else if opCode == mirc.CLIENT_CREATE_ROOM {
 			c.addRoomHandler(msg)
+		} else if opCode == mirc.CLIENT_JOIN_ROOM {
+			c.joinRoomHandler(msg)
 		}
 		//daytime := time.Now().String()
 	}
@@ -187,6 +240,7 @@ func main() {
 		os.Exit(-1)
 	}
 	fmt.Print("Server has started. Control + C to exit\n")
+	addRoom("public", "server")
 	for {
 		conn, err := ln.Accept()
 		if err != nil {

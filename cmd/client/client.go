@@ -136,6 +136,12 @@ func (c *client) sendPrivateMsg(receiver string, msgBody string) error {
 	return c.Socket.SendMsg(msg)
 }
 
+// send a private message to a client
+func (c *client) sendPubMsg(msgBody string) error {
+	msg := c.newMsg(mirc.CLIENT_SEND_PUB_MESSAGE, currentRoom, msgBody)
+	return c.Socket.SendMsg(msg)
+}
+
 // command parser return command word and message
 func comParser(cmdLine string) (string, string) {
 	cmdLine = strings.Replace(cmdLine, "\n", "", -1)
@@ -162,6 +168,8 @@ func (c *client) commandLoop() {
 
 		if cmd == "\\create" {
 			c.createRoom(arg)
+		} else if cmd == "\\nick" {
+			c.changeNick()
 		} else if cmd == "\\join" {
 			c.joinRoom(arg)
 		} else if cmd[0] == '@' {
@@ -169,6 +177,8 @@ func (c *client) commandLoop() {
 		} else if cmd == "\\exit" {
 			fmt.Printf("Bye!\n")
 			os.Exit(0)
+		} else {
+			c.sendPubMsg(cmdLine)
 		}
 
 	}
