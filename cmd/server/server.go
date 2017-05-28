@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"errors"
@@ -90,10 +91,38 @@ func (r *room) addMember(nick string) error {
 
 }
 
+// remove member to a room
+func (r *room) removeMember(nick string) error {
+	i := contain(r.Members, nick)
+	if i > 0 {
+		r.Members = append(r.Members[:i], r.Members[i+1:]...)
+		return nil
+	}
+	//  Cannot delete non member
+	return errors.New("member doesn't exist")
+
+}
+
+// check if element in list
+func contain(list []string, el string) int {
+	for i, v := range list {
+		if v == el {
+			// Found!
+			return i
+		}
+	}
+	return -1
+}
+
 // remove client from the client list
-func removeClient(cnick string, clientMap map[string]client) int {
-	if _, ok := clientMap[cnick]; ok {
-		delete(clientMap, cnick)
+func removeClient(nick string, clientMap map[string]client) int {
+	if _, ok := clientMap[nick]; ok {
+		delete(clientMap, nick)
+	}
+	for roomName := range rooms {
+		r := rooms[roomName]
+		r.removeMember(nick)
+		rooms[roomName] = r
 		return 0
 	}
 	return -1
@@ -123,6 +152,17 @@ func (c *client) joinRoomHandler(m *mirc.Message) {
 	c.Socket.SetWriteDeadline(mirc.CalDeadline(timeout))
 	msgBody := "You joined " + m.Body + "!\n"
 	c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, msgBody))
+	return
+}
+
+// listRoomHandler
+func (c *client) listRoomHandler() {
+	var roomList []string
+	for name := range rooms {
+		roomList = append(roomList, name)
+	}
+	msgBody := strings.Join(roomList, " ,")
+	c.Socket.SendMsg(newMsg(mirc.SERVER_RPL_LIST_ROOM, c.Nick, msgBody))
 	return
 }
 
@@ -183,6 +223,8 @@ func (c *client) requestHandler() {
 			c.addRoomHandler(msg)
 		} else if opCode == mirc.CLIENT_JOIN_ROOM {
 			c.joinRoomHandler(msg)
+		} else if opCode == mirc.CLIENT_LIST_ROOM {
+			c.listRoomHandler()
 		}
 		//daytime := time.Now().String()
 	}

@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"sync"
+
+	"github.com/jroimartin/gocui"
 	"github.com/shaynewang/mirc"
 )
 
@@ -21,6 +24,7 @@ const ping = 10
 
 type client mirc.Client
 
+var currentClient *client
 var currentRoom = "public"
 
 // Initialize new client connection
@@ -37,7 +41,7 @@ func newClient(server string) *client {
 		IP:     conn.LocalAddr(),
 		Socket: &con,
 	}
-	new.setNick()
+	new.Nick = setNick()
 	return &new
 }
 
@@ -64,28 +68,28 @@ func newClientConnection(server string) *mirc.Connection {
 }
 
 // Sets nickname locally
-func (c *client) setNick() {
+func setNick() string {
 	fmt.Print("Input your nickname:")
 	reader := bufio.NewReader(os.Stdin)
 	nick, _ := reader.ReadString('\n')
 	nick = strings.Replace(nick, "\n", "", -1)
-	c.Nick = nick
+	return nick
 }
 
 // Prompt user to input to a nick name
 // Then update it with the server
-func (c *client) changeNick() {
+func (c *client) changeNick(nick string) {
 	var opCode int16
 	var msg *mirc.Message
 	opCode = mirc.CONNECTION_FAILURE
 	for opCode == mirc.CONNECTION_FAILURE {
-		c.setNick()
-		msg = c.newServMsg(mirc.CLIENT_CHANGE_NICK, c.Nick)
+		msg = c.newServMsg(mirc.CLIENT_CHANGE_NICK, nick)
 		c.Socket.Conn.SetDeadline(mirc.CalDeadline(timeout))
 		c.Socket.SendMsg(msg)
 		opCode, msg = c.Socket.GetMsg()
 		fmt.Printf("Error: %s\n", msg.Body)
 	}
+	c.Nick = nick
 }
 
 // send request to connect to the server
@@ -106,7 +110,7 @@ func (c *client) requestToConnect() error {
 			opCode, msg := c.Socket.GetMsg()
 			for opCode == mirc.CONNECTION_FAILURE {
 				fmt.Printf("Cannot connect: %s\n", msg.Body)
-				c.changeNick()
+				c.changeNick(setNick())
 				c.Socket.Conn.SetDeadline(mirc.CalDeadline(timeout))
 				opCode, msg = c.Socket.GetMsg()
 			}
@@ -119,7 +123,7 @@ func (c *client) requestToConnect() error {
 
 // send a request to create a room to server
 func (c *client) createRoom(room string) error {
-	fmt.Printf("requesting new room %s\n", room)
+	//fmt.Printf("requesting new room %s\n", room)
 	msg := c.newServMsg(mirc.CLIENT_CREATE_ROOM, room)
 	return c.Socket.SendMsg(msg)
 }
@@ -165,41 +169,33 @@ func (c *client) listRoom() error {
 	return c.Socket.SendMsg(reqMsg)
 }
 
-// command loop
-func (c *client) commandLoop() {
-	go msgHandlerLoop(c.Socket)
+// message handler loop
+func msgHandlerLoop(c *mirc.Connection, g *gocui.Gui) {
 	for {
-
-		fmt.Printf("[ %s ] ", currentRoom)
-		reader := bufio.NewReader(os.Stdin)
-		cmdLine, _ := reader.ReadString('\n')
-		cmd, arg := comParser(cmdLine)
-
-		if cmd == "\\create" {
-			c.createRoom(arg)
-		} else if cmd == "\\nick" {
-			c.changeNick()
-		} else if cmd == "\\join" {
-			c.joinRoom(arg)
-		} else if cmd == "\\listRoom" {
-			c.listRoom()
-		} else if cmd[0] == '@' {
-			c.sendPrivateMsg(cmd[1:], arg)
-		} else if cmd == "\\exit" {
-			fmt.Printf("Bye!\n")
-			os.Exit(0)
-		} else {
-			c.sendPubMsg(cmdLine)
-		}
-
+		msgHandler(c, g)
 	}
 }
 
-// message handler loop
-func msgHandlerLoop(c *mirc.Connection) {
-	for {
-		msgHandler(c)
+// Handles a message
+func msgHandler(c *mirc.Connection, g *gocui.Gui) int {
+	lv, _ := g.View("view")
+	c.Conn.SetDeadline(mirc.CalDeadline(timeout))
+	opCode, msg := c.GetMsg()
+
+	if opCode == mirc.ERROR {
+		return -1
+	} else if opCode == mirc.SERVER_BROADCAST_MESSAGE || opCode == mirc.SERVER_TELL_MESSAGE {
+		fmt.Fprintf(lv, "\n%s [%s] %s: %s\n", mirc.GetTime(), currentRoom, msg.Header.Sender, msg.Body)
+	} else if opCode == mirc.CONNECTION_CLOSED {
+		fmt.Fprintf(lv, "Server connection closed, client exiting...\n")
+		g.Close()
+		os.Exit(0)
+	} else if opCode == mirc.SERVER_RPL_LIST_ROOM {
+		fmt.Fprintf(lv, "Rooms available: %s\n", msg.Body)
+	} else if opCode == mirc.SERVER_RPL_LIST_MEMBER {
+		fmt.Fprintf(lv, "Members in %s: %s\n", currentRoom, msg.Body)
 	}
+	return 0
 }
 
 // periodically send ping to the server to notify this client is alive
@@ -211,33 +207,119 @@ func (c *client) keepAliveLoop() {
 	}
 }
 
-// Handles a message
-func msgHandler(c *mirc.Connection) int {
-	c.Conn.SetDeadline(mirc.CalDeadline(timeout))
-	opCode, msg := c.GetMsg()
-
-	if opCode == mirc.ERROR {
-		return -1
-	} else if opCode == mirc.SERVER_BROADCAST_MESSAGE || opCode == mirc.SERVER_TELL_MESSAGE {
-		fmt.Printf("\n%s [%s] %s: %s\n", mirc.GetTime(), currentRoom, msg.Header.Sender, msg.Body)
-	} else if opCode == mirc.CONNECTION_CLOSED {
-		fmt.Printf("Server connection closed, client exiting...\n")
-		os.Exit(0)
-	} else if opCode == mirc.SERVER_RPL_LIST_ROOM {
-		fmt.Printf("Rooms available: %s\n", msg.Body)
-	} else if opCode == mirc.SERVER_RPL_LIST_MEMBER {
-		fmt.Printf("Members in %s: %s\n", currentRoom, msg.Body)
+/* ==================================================================================== */
+func main() {
+	currentClient = newClient(SERVER)
+	// Initialize Connection
+	currentClient.requestToConnect()
+	go currentClient.keepAliveLoop()
+	g, err := gocui.NewGui(gocui.OutputNormal)
+	if err != nil {
+		log.Panicln(err)
 	}
-	return 0
+	defer g.Close()
+
+	g.Cursor = true
+
+	g.SetManagerFunc(layout)
+	maxX, maxY := g.Size()
+	if lv, err := g.SetView("view", 2, 1, maxX-2, maxY-8); err != nil {
+		if err != gocui.ErrUnknownView {
+			fmt.Printf("Error: %s\n", err)
+		}
+		lv.Title = "Messages"
+		lv.Autoscroll = true
+	}
+
+	if iv, err := g.SetView("input", 2, maxY-6, maxX-2, maxY-1); err != nil {
+		if err != gocui.ErrUnknownView {
+			fmt.Printf("Error: %s\n", err)
+		}
+		iv.Title = "Input"
+		iv.Editable = true
+		err = iv.SetCursor(0, 0)
+		_, err = g.SetCurrentView("input")
+		if err != nil {
+			log.Println("Cannot set focus to input view:", err)
+		}
+	}
+	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
+		log.Panicln(err)
+	}
+	if err := g.SetKeybinding("input", gocui.KeyEnter, gocui.ModNone, inputFunc); err != nil {
+		log.Panicln(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go g.MainLoop()
+	go msgHandlerLoop(currentClient.Socket, g)
+
+	wg.Wait()
+
 }
 
-// Main event loop
-func main() {
-	client := newClient(SERVER)
-	// Initialize Connection
-	fmt.Printf("Current server: %s\n", SERVER)
-	client.requestToConnect()
-	go client.keepAliveLoop()
-	client.commandLoop()
+func layout(g *gocui.Gui) error {
+	maxX, maxY := g.Size()
+	if lv, err := g.SetView("view", 2, 1, maxX-2, maxY-8); err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		lv.Title = "Messages"
+		lv.Autoscroll = true
+		fmt.Fprintln(lv, "dsfdasfsafadsfsad")
+	}
 
+	if iv, err := g.SetView("input", 2, maxY-6, maxX-2, maxY-1); err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		iv.Title = "Input"
+		iv.Editable = true
+		err = iv.SetCursor(0, 0)
+		_, err = g.SetCurrentView("input")
+		if err != nil {
+			log.Println("Cannot set focus to input view:", err)
+		}
+	}
+
+	return nil
+}
+
+func inputFunc(g *gocui.Gui, iv *gocui.View) error {
+	//lv, _ := g.View("view")
+	v, _ := g.View("input")
+	//n = v.ViewBuffer()
+	cmdLine := iv.ViewBuffer()
+	//lv.Clear()
+	v.Clear()
+	v.SetCursor(0, 0)
+	cmd, arg := comParser(cmdLine)
+	if len(cmd) == 0 {
+		return nil
+	}
+	lv, _ := g.View("view")
+
+	if cmd == "\\create" {
+		currentClient.createRoom(arg)
+	} else if cmd == "\\nick" {
+		currentClient.changeNick(arg)
+	} else if cmd == "\\join" {
+		currentClient.joinRoom(arg)
+	} else if cmd == "\\listRoom" {
+		currentClient.listRoom()
+	} else if cmd[0] == '@' {
+		currentClient.sendPrivateMsg(cmd[1:], arg)
+	} else if cmd == "\\exit" {
+		fmt.Fprintf(lv, "Bye!\n")
+		g.Close()
+		os.Exit(0)
+	} else {
+		currentClient.sendPubMsg(cmdLine)
+	}
+
+	return nil
+}
+
+func quit(g *gocui.Gui, v *gocui.View) error {
+	return gocui.ErrQuit
 }
