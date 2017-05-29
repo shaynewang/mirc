@@ -134,6 +134,12 @@ func (c *client) joinRoom(room string) error {
 	return c.Socket.SendMsg(msg)
 }
 
+// send a request to leave a room
+func (c *client) leaveRoom(room string) error {
+	msg := c.newServMsg(mirc.CLIENT_LEAVE_ROOM, room)
+	return c.Socket.SendMsg(msg)
+}
+
 // send a private message to a client
 func (c *client) sendPrivateMsg(receiver string, msgBody string) error {
 	msg := c.newMsg(mirc.CLIENT_SEND_MESSAGE, receiver, msgBody)
@@ -333,6 +339,8 @@ func inputFunc(g *gocui.Gui, iv *gocui.View) error {
 		currentClient.joinRoom(arg)
 	} else if cmd == "\\listRoom" {
 		currentClient.listRoom()
+	} else if cmd == "\\leave" {
+		currentClient.leaveRoom(arg)
 	} else if cmd[0] == '@' {
 		g.Execute(func(g *gocui.Gui) error {
 			v, err := g.View("view")

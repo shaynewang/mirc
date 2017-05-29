@@ -81,8 +81,9 @@ func (c *client) joinRoom(roomName string) error {
 
 // add member to a room
 func (r *room) addMember(nick string) error {
-	if _, ok := rooms[nick]; ok {
+	if contain(r.Members, nick) >= 0 {
 		//  Cannot add duplicated nickname
+		fmt.Printf("%s is already in %s\n", nick, r.Name)
 		return errors.New("nickname exists")
 	}
 
@@ -91,7 +92,7 @@ func (r *room) addMember(nick string) error {
 
 }
 
-// remove member to a room
+// remove member from a room
 func (r *room) removeMember(nick string) error {
 	i := contain(r.Members, nick)
 	if i > 0 {
@@ -99,7 +100,7 @@ func (r *room) removeMember(nick string) error {
 		return nil
 	}
 	//  Cannot delete non member
-	return errors.New("member doesn't exist")
+	return errors.New("cannot remove memeber")
 
 }
 
@@ -225,6 +226,17 @@ func (c *client) requestHandler() {
 			c.joinRoomHandler(msg)
 		} else if opCode == mirc.CLIENT_LIST_ROOM {
 			c.listRoomHandler()
+		} else if opCode == mirc.CLIENT_LEAVE_ROOM {
+			r := rooms[msg.Body]
+			err := r.removeMember(c.Nick)
+			if err != nil {
+				c.Socket.SendMsg(newMsg(mirc.ERROR, c.Nick, "cannot remove member"))
+			} else {
+				rooms[msg.Body] = r
+				m := "you left room " + msg.Body
+				fmt.Printf("%s says %s\n", c.Nick, msg.Body)
+				c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, m))
+			}
 		}
 		//daytime := time.Now().String()
 	}
