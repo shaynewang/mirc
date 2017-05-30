@@ -101,6 +101,11 @@ func (r *room) removeMember(nick string) error {
 	i := contain(r.Members, nick)
 	if i >= 0 {
 		r.Members = append(r.Members[:i], r.Members[i+1:]...)
+		if len(r.Members) <= 0 {
+			delete(rooms, r.Name)
+			fmt.Printf("empty room %s has been removed\n", r.Name)
+			fmt.Printf("DEBUG: %s\n", rooms)
+		}
 		return nil
 	}
 	//  Cannot delete non member
@@ -128,7 +133,9 @@ func removeClient(nick string, clientMap map[string]client) int {
 	for roomName := range rooms {
 		r := rooms[roomName]
 		r.removeMember(nick)
-		rooms[roomName] = r
+		if len(r.Members) > 0 {
+			rooms[roomName] = r
+		}
 	}
 	return 0
 }
@@ -268,11 +275,13 @@ func (c *client) requestHandler() {
 			if err != nil {
 				c.Socket.SendMsg(newMsg(mirc.ERROR, c.Nick, "cannot remove member"))
 			} else {
-				rooms[msg.Body] = r
+				if len(r.Members) > 0 {
+					rooms[msg.Body] = r
+					m := msg.Header.Sender + " left the room"
+					broadCastMsg(newMsg(mirc.SERVER_BROADCAST_MESSAGE, msg.Body, m))
+				}
 				m := "you have left the room " + msg.Body
 				c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, m))
-				m = msg.Header.Sender + " left the room"
-				broadCastMsg(newMsg(mirc.SERVER_BROADCAST_MESSAGE, msg.Body, m))
 			}
 		} else if opCode == mirc.CLIENT_LIST_MEMBER {
 			c.listMemberHandler(msg.Body)
