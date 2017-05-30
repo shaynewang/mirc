@@ -258,7 +258,7 @@ func (c *client) requestHandler() {
 		} else if opCode == mirc.CLIENT_SEND_MESSAGE {
 			rallyMsg(msg)
 		} else if opCode == mirc.CONNECTION_PING {
-			c.Socket.SendMsg(newMsg(mirc.CONNECTION_PING, c.Nick, "pong"))
+			c.Socket.SendMsg(newMsg(mirc.CONNECTION_ACK, c.Nick, "pong"))
 		} else if opCode == mirc.CONNECTION_CLOSED {
 			removeClient(c.Nick, activeClients)
 		} else if opCode == mirc.CLIENT_CREATE_ROOM {

@@ -92,6 +92,11 @@ func setNick() string {
 	reader := bufio.NewReader(os.Stdin)
 	nick, _ := reader.ReadString('\n')
 	nick = strings.Replace(nick, "\n", "", -1)
+	for len(nick) <= 0 {
+		fmt.Print("Input a valid nickname:")
+		nick, _ = reader.ReadString('\n')
+		nick = strings.Replace(nick, "\n", "", -1)
+	}
 	return nick
 }
 
@@ -222,14 +227,6 @@ func msgHandler(c *mirc.Connection, g *gocui.Gui) int {
 	opCode, msg := c.GetMsg()
 
 	if opCode == mirc.ERROR {
-		g.Execute(func(g *gocui.Gui) error {
-			v, err := g.View("view")
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(v, "Server connection closed, client exiting...\n")
-			return nil
-		})
 		g.Close()
 		fmt.Print("Server connection has lost...Client exited\n")
 		os.Exit(0)
