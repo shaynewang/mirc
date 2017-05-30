@@ -49,7 +49,6 @@ func newClient(server string) *client {
 	conn, err := net.Dial("tcp", server)
 	if err != nil {
 		log.Printf("ERROR: server %s is not available\n", server)
-		//log.Printf("ERROR: %s", err)
 		// TODO: add error handleing, maybe ask for new server IP
 		os.Exit(-1)
 	}
@@ -107,9 +106,12 @@ func (c *client) changeNick(nick string) {
 		c.Socket.Conn.SetDeadline(mirc.CalDeadline(timeout))
 		c.Socket.SendMsg(msg)
 		opCode, msg = c.Socket.GetMsg()
-		fmt.Printf("Error: %s\n", msg.Body)
+		if opCode == mirc.CONNECTION_SUCCESS {
+			c.Nick = nick
+		} else {
+			fmt.Printf("Error: %s\n", msg.Body)
+		}
 	}
-	c.Nick = nick
 }
 
 // send request to connect to the server
@@ -128,11 +130,9 @@ func (c *client) requestToConnect() error {
 			// request new nickname if exisit in server
 			c.Socket.Conn.SetDeadline(mirc.CalDeadline(timeout))
 			opCode, msg := c.Socket.GetMsg()
-			for opCode == mirc.CONNECTION_FAILURE {
+			if opCode == mirc.CONNECTION_FAILURE {
 				fmt.Printf("Cannot connect: %s\n", msg.Body)
 				c.changeNick(setNick())
-				c.Socket.Conn.SetDeadline(mirc.CalDeadline(timeout))
-				opCode, msg = c.Socket.GetMsg()
 			}
 			fmt.Printf("Connected\n")
 			break
@@ -304,11 +304,10 @@ func (c *client) keepAliveLoop() {
 	}
 }
 
-/* ==================================================================================== */
+/* =================================== User Interface specifics ========================================= */
 func main() {
 	config := conf{}
 	getConf(&config)
-	//currentClient = newClient(SERVER)
 	fmt.Printf("server: %s\n", config.Server)
 	currentClient = newClient(config.Server)
 	// Initialize Connection
@@ -322,13 +321,12 @@ func main() {
 
 	g.Cursor = true
 
-	g.SetManagerFunc(layout)
+	//g.SetManagerFunc(layout)
 	maxX, maxY := g.Size()
 	if lv, err := g.SetView("view", 2, 1, maxX-2, maxY-8); err != nil {
 		if err != gocui.ErrUnknownView {
 			fmt.Printf("Error: %s\n", err)
 		}
-		//lv.Title = "Messages"
 		lv.Title = currentRoom
 		lv.Autoscroll = true
 	}
@@ -360,6 +358,7 @@ func main() {
 
 }
 
+// gui layout functions
 func layout(g *gocui.Gui) error {
 	maxX, maxY := g.Size()
 	if lv, err := g.SetView("view", 2, 1, maxX-2, maxY-8); err != nil {
@@ -386,29 +385,31 @@ func layout(g *gocui.Gui) error {
 	return nil
 }
 
+// handles commands from user input
 func inputFunc(g *gocui.Gui, iv *gocui.View) error {
 	v, _ := g.View("input")
 	cmdLine := iv.ViewBuffer()
 	v.Clear()
 	v.SetCursor(0, 0)
 	cmd, arg := comParser(cmdLine)
-	if len(cmd) == 0 {
+	if len(cmd) == 0 { // ignore empty input
 		return nil
 	}
 
-	if cmd == "\\create" {
+	if cmd == "\\create" { // create a chat room
 		currentClient.createRoom(arg)
-	} else if cmd == "\\join" {
+	} else if cmd == "\\join" { // join a chat room
 		currentClient.joinRoom(arg)
-	} else if cmd == "\\listRoom" {
+	} else if cmd == "\\listRoom" { // list all char rooms on a server
 		currentClient.listRoom()
-	} else if cmd == "\\changeRoom" {
+	} else if cmd == "\\changeRoom" { // change current chat room
 		currentClient.changeRoom(arg)
-	} else if cmd == "\\listMember" {
+	} else if cmd == "\\listMember" { // list membership of a room
 		currentClient.listMember(arg)
-	} else if cmd == "\\leave" {
+	} else if cmd == "\\leave" { // leave room
 		currentClient.leaveRoom(arg)
-	} else if cmd[0] == '@' {
+		currentRoom = "public"
+	} else if cmd[0] == '@' { // Private user message
 		g.Execute(func(g *gocui.Gui) error {
 			v, err := g.View("view")
 			if err != nil {
@@ -418,12 +419,12 @@ func inputFunc(g *gocui.Gui, iv *gocui.View) error {
 			return nil
 		})
 		currentClient.sendPrivateMsg(cmd[1:], arg)
-	} else if cmd == "\\exit" {
+	} else if cmd == "\\exit" { // exits the client
 		g.Close()
 		currentClient.closeConnection()
 		fmt.Printf("Bye!\n")
 		os.Exit(0)
-	} else {
+	} else { // send public message
 		currentClient.sendPubMsg(cmdLine)
 	}
 

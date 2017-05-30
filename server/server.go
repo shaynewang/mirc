@@ -75,7 +75,7 @@ func (c *client) joinRoom(roomName string) error {
 	r := rooms[roomName]
 	r.addMember(c.Nick)
 	rooms[roomName] = r
-	fmt.Printf("%s added to %s\n", c.Nick, r)
+	fmt.Printf("%s is added to %s\n", c.Nick, r)
 	return nil
 }
 
@@ -88,6 +88,10 @@ func (r *room) addMember(nick string) error {
 	}
 
 	r.Members = append(r.Members, nick)
+	if len(r.Members) > 1 {
+		m := nick + " joined"
+		broadCastMsg(newMsg(mirc.SERVER_BROADCAST_MESSAGE, r.Name, m))
+	}
 	return nil
 
 }
@@ -156,7 +160,7 @@ func (c *client) joinRoomHandler(m *mirc.Message) {
 	return
 }
 
-// listRoomHandler
+// list all rooms of client's request
 func (c *client) listRoomHandler() {
 	var roomList []string
 	for name := range rooms {
@@ -167,6 +171,7 @@ func (c *client) listRoomHandler() {
 	return
 }
 
+// list all members of a room that client's requested
 func (c *client) listMemberHandler(room string) {
 	if _, ok := rooms[room]; !ok {
 		c.Socket.SetWriteDeadline(mirc.CalDeadline(timeout))
@@ -192,7 +197,6 @@ func (c *client) inRoomHandler(room string) {
 		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, "not a member of the room"))
 		return
 	}
-	fmt.Print("DEBUG: in room")
 	c.Socket.SendMsg(newMsg(mirc.SERVER_RPL_CLIENT_IN_ROOM, c.Nick, room))
 	return
 }
@@ -219,11 +223,9 @@ func broadCastMsg(m *mirc.Message) {
 	}
 	receiverList := rooms[m.Header.Receiver].Members
 	m.Header.OpCode = mirc.SERVER_BROADCAST_MESSAGE
-	fmt.Printf("%s list\n", receiverList)
 	for i := 0; i < len(receiverList); i++ {
 		c := receiverList[i]
 		if c != "server" {
-			fmt.Printf("client %s\n", c)
 			activeClients[c].Socket.SendMsg(m)
 		}
 	}
@@ -231,12 +233,12 @@ func broadCastMsg(m *mirc.Message) {
 
 }
 
+// handles requests from clients
 func (c *client) requestHandler() {
 	for {
 		c.Socket.Conn.SetReadDeadline(mirc.CalDeadline(inactiveTimeout))
 		opCode, msg := c.Socket.GetMsg()
 		if opCode == mirc.ERROR {
-			fmt.Printf("Server DEBUG: %d\n", opCode)
 			c.Socket.Conn.Close()
 			removeClient(c.Nick, activeClients)
 			c.Socket.SendMsg(newMsg(mirc.CONNECTION_CLOSED, c.Nick, "server has closed your connection"))
@@ -244,13 +246,12 @@ func (c *client) requestHandler() {
 			return
 		}
 		if opCode == mirc.CLIENT_SEND_PUB_MESSAGE {
-			fmt.Printf("%s says %s\n", c.Nick, msg.Body)
+			fmt.Printf("%s says %s to %s\n", c.Nick, msg.Body, msg.Header.Receiver)
 			broadCastMsg(msg)
 		} else if opCode == mirc.CLIENT_SEND_MESSAGE {
 			rallyMsg(msg)
 		} else if opCode == mirc.CONNECTION_PING {
-			c.Socket.SendMsg(newMsg(mirc.CONNECTION_PING, c.Nick, "ping"))
-			continue
+			c.Socket.SendMsg(newMsg(mirc.CONNECTION_PING, c.Nick, "pong"))
 		} else if opCode == mirc.CONNECTION_CLOSED {
 			removeClient(c.Nick, activeClients)
 		} else if opCode == mirc.CLIENT_CREATE_ROOM {
@@ -268,14 +269,14 @@ func (c *client) requestHandler() {
 				c.Socket.SendMsg(newMsg(mirc.ERROR, c.Nick, "cannot remove member"))
 			} else {
 				rooms[msg.Body] = r
-				m := "you left room " + msg.Body
-				fmt.Printf("%s says %s\n", c.Nick, msg.Body)
+				m := "you have left the room " + msg.Body
 				c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, m))
+				m = msg.Header.Sender + " left the room"
+				broadCastMsg(newMsg(mirc.SERVER_BROADCAST_MESSAGE, msg.Body, m))
 			}
 		} else if opCode == mirc.CLIENT_LIST_MEMBER {
 			c.listMemberHandler(msg.Body)
 		}
-		//daytime := time.Now().String()
 	}
 }
 
