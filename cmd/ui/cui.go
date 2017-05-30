@@ -154,7 +154,7 @@ func (c *client) sendPubMsg(msgBody string) error {
 
 // command parser return command word and message
 func comParser(cmdLine string) (string, string) {
-	cmdLine = strings.Replace(cmdLine, "\n", "", -1)
+	cmdLine = strings.TrimSpace(cmdLine)
 	args := strings.SplitN(cmdLine, " ", 2)
 	cmd := args[0]
 	arg := ""
@@ -164,15 +164,29 @@ func comParser(cmdLine string) (string, string) {
 	return cmd, arg
 }
 
-// changeRoom changes client's current room
-func changeRoom(roomName string) {
-	currentRoom = roomName
-}
-
 // listRoom lists all rooms in the server
 func (c *client) listRoom() error {
 	reqMsg := c.newServMsg(mirc.CLIENT_LIST_ROOM, "")
 	return c.Socket.SendMsg(reqMsg)
+}
+
+// changeRoom if input room exists in the server and the client is
+// a memeber to that room then change the current room to that
+func (c *client) changeRoom(room string) error {
+	reqMsg := c.newServMsg(mirc.CLIENT_IN_ROOM, room)
+	return c.Socket.SendMsg(reqMsg)
+}
+
+// listMember lists all members in a room
+func (c *client) listMember(room string) error {
+	reqMsg := c.newServMsg(mirc.CLIENT_LIST_MEMBER, room)
+	return c.Socket.SendMsg(reqMsg)
+}
+
+// closeConnection sends a close connection request to the server
+func (c *client) closeConnection() {
+	reqMsg := c.newServMsg(mirc.CONNECTION_CLOSED, "")
+	c.Socket.SendMsg(reqMsg)
 }
 
 // message handler loop
@@ -182,20 +196,39 @@ func msgHandlerLoop(c *mirc.Connection, g *gocui.Gui) {
 	}
 }
 
-// Handles a message
+// Handles an incoming message
 func msgHandler(c *mirc.Connection, g *gocui.Gui) int {
 	c.Conn.SetDeadline(mirc.CalDeadline(timeout))
 	opCode, msg := c.GetMsg()
 
 	if opCode == mirc.ERROR {
-		return -1
-	} else if opCode == mirc.SERVER_BROADCAST_MESSAGE || opCode == mirc.SERVER_TELL_MESSAGE {
 		g.Execute(func(g *gocui.Gui) error {
 			v, err := g.View("view")
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(v, "\n%s [%s] %s: %s\n", mirc.GetTime(), currentRoom, msg.Header.Sender, msg.Body)
+			fmt.Fprintf(v, "Server connection closed, client exiting...\n")
+			return nil
+		})
+		g.Close()
+		fmt.Print("Server connection has lost...Client exited\n")
+		os.Exit(0)
+	} else if opCode == mirc.SERVER_BROADCAST_MESSAGE {
+		g.Execute(func(g *gocui.Gui) error {
+			v, err := g.View("view")
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(v, "\n%s [%s] %s: %s\n", mirc.GetTime(), msg.Header.Receiver, msg.Header.Sender, msg.Body)
+			return nil
+		})
+	} else if opCode == mirc.SERVER_TELL_MESSAGE {
+		g.Execute(func(g *gocui.Gui) error {
+			v, err := g.View("view")
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(v, "\n%s [PRIVATE] %s: %s\n", mirc.GetTime(), msg.Header.Sender, msg.Body)
 			return nil
 		})
 	} else if opCode == mirc.CONNECTION_CLOSED {
@@ -224,7 +257,18 @@ func msgHandler(c *mirc.Connection, g *gocui.Gui) int {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(v, "Members in %s: %s\n", currentRoom, msg.Body)
+			fmt.Fprintf(v, "Members: %s\n", msg.Body)
+			return nil
+		})
+	} else if opCode == mirc.SERVER_RPL_CLIENT_IN_ROOM {
+		currentRoom = msg.Body
+		g.Execute(func(g *gocui.Gui) error {
+			v, err := g.View("view")
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(v, "current Room: %s\n", currentRoom)
+			v.Title = currentRoom
 			return nil
 		})
 	}
@@ -260,7 +304,8 @@ func main() {
 		if err != gocui.ErrUnknownView {
 			fmt.Printf("Error: %s\n", err)
 		}
-		lv.Title = "Messages"
+		//lv.Title = "Messages"
+		lv.Title = currentRoom
 		lv.Autoscroll = true
 	}
 
@@ -268,7 +313,7 @@ func main() {
 		if err != gocui.ErrUnknownView {
 			fmt.Printf("Error: %s\n", err)
 		}
-		iv.Title = "Input"
+		iv.Title = currentClient.Nick
 		iv.Editable = true
 		err = iv.SetCursor(0, 0)
 		_, err = g.SetCurrentView("input")
@@ -318,27 +363,25 @@ func layout(g *gocui.Gui) error {
 }
 
 func inputFunc(g *gocui.Gui, iv *gocui.View) error {
-	//lv, _ := g.View("view")
 	v, _ := g.View("input")
-	//n = v.ViewBuffer()
 	cmdLine := iv.ViewBuffer()
-	//lv.Clear()
 	v.Clear()
 	v.SetCursor(0, 0)
 	cmd, arg := comParser(cmdLine)
 	if len(cmd) == 0 {
 		return nil
 	}
-	lv, _ := g.View("view")
 
 	if cmd == "\\create" {
 		currentClient.createRoom(arg)
-	} else if cmd == "\\nick" {
-		currentClient.changeNick(arg)
 	} else if cmd == "\\join" {
 		currentClient.joinRoom(arg)
 	} else if cmd == "\\listRoom" {
 		currentClient.listRoom()
+	} else if cmd == "\\changeRoom" {
+		currentClient.changeRoom(arg)
+	} else if cmd == "\\listMember" {
+		currentClient.listMember(arg)
 	} else if cmd == "\\leave" {
 		currentClient.leaveRoom(arg)
 	} else if cmd[0] == '@' {
@@ -347,13 +390,14 @@ func inputFunc(g *gocui.Gui, iv *gocui.View) error {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(v, "\n%s [%s] %s: %s\n", mirc.GetTime(), currentRoom, currentClient.Nick, arg)
+			fmt.Fprintf(v, "\n%s [PRIVATE] %s: %s\n", mirc.GetTime(), currentClient.Nick, arg)
 			return nil
 		})
 		currentClient.sendPrivateMsg(cmd[1:], arg)
 	} else if cmd == "\\exit" {
-		fmt.Fprintf(lv, "Bye!\n")
 		g.Close()
+		currentClient.closeConnection()
+		fmt.Printf("Bye!\n")
 		os.Exit(0)
 	} else {
 		currentClient.sendPubMsg(cmdLine)

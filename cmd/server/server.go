@@ -95,11 +95,12 @@ func (r *room) addMember(nick string) error {
 // remove member from a room
 func (r *room) removeMember(nick string) error {
 	i := contain(r.Members, nick)
-	if i > 0 {
+	if i >= 0 {
 		r.Members = append(r.Members[:i], r.Members[i+1:]...)
 		return nil
 	}
 	//  Cannot delete non member
+	fmt.Printf("DEBUG: member %s removed from %s: %s", nick, r.Name, r.Members)
 	return errors.New("cannot remove memeber")
 
 }
@@ -124,9 +125,8 @@ func removeClient(nick string, clientMap map[string]client) int {
 		r := rooms[roomName]
 		r.removeMember(nick)
 		rooms[roomName] = r
-		return 0
 	}
-	return -1
+	return 0
 }
 
 //addRoomHandler
@@ -164,6 +164,36 @@ func (c *client) listRoomHandler() {
 	}
 	msgBody := strings.Join(roomList, " ,")
 	c.Socket.SendMsg(newMsg(mirc.SERVER_RPL_LIST_ROOM, c.Nick, msgBody))
+	return
+}
+
+func (c *client) listMemberHandler(room string) {
+	if _, ok := rooms[room]; !ok {
+		c.Socket.SetWriteDeadline(mirc.CalDeadline(timeout))
+		msgBody := "room " + room + " doesn't exist.\n"
+		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, msgBody))
+		return
+	}
+	msgBody := strings.Join(rooms[room].Members, " ,")
+	c.Socket.SendMsg(newMsg(mirc.SERVER_RPL_LIST_MEMBER, c.Nick, msgBody))
+	return
+}
+
+// handles request if client is a member of a room
+// replies with "true" if it's a member and "false" if not a member
+func (c *client) inRoomHandler(room string) {
+	if _, ok := rooms[room]; !ok {
+		c.Socket.SetWriteDeadline(mirc.CalDeadline(timeout))
+		msgBody := "room " + room + " doesn't exist.\n"
+		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, msgBody))
+		return
+	}
+	if contain(rooms[room].Members, c.Nick) < 0 {
+		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, "not a member of the room"))
+		return
+	}
+	fmt.Print("DEBUG: in room")
+	c.Socket.SendMsg(newMsg(mirc.SERVER_RPL_CLIENT_IN_ROOM, c.Nick, room))
 	return
 }
 
@@ -206,7 +236,7 @@ func (c *client) requestHandler() {
 		c.Socket.Conn.SetReadDeadline(mirc.CalDeadline(inactiveTimeout))
 		opCode, msg := c.Socket.GetMsg()
 		if opCode == mirc.ERROR {
-			fmt.Printf("Server DEBUG: %s\n", opCode)
+			fmt.Printf("Server DEBUG: %d\n", opCode)
 			c.Socket.Conn.Close()
 			removeClient(c.Nick, activeClients)
 			c.Socket.SendMsg(newMsg(mirc.CONNECTION_CLOSED, c.Nick, "server has closed your connection"))
@@ -219,13 +249,18 @@ func (c *client) requestHandler() {
 		} else if opCode == mirc.CLIENT_SEND_MESSAGE {
 			rallyMsg(msg)
 		} else if opCode == mirc.CONNECTION_PING {
+			c.Socket.SendMsg(newMsg(mirc.CONNECTION_PING, c.Nick, "ping"))
 			continue
+		} else if opCode == mirc.CONNECTION_CLOSED {
+			removeClient(c.Nick, activeClients)
 		} else if opCode == mirc.CLIENT_CREATE_ROOM {
 			c.addRoomHandler(msg)
 		} else if opCode == mirc.CLIENT_JOIN_ROOM {
 			c.joinRoomHandler(msg)
 		} else if opCode == mirc.CLIENT_LIST_ROOM {
 			c.listRoomHandler()
+		} else if opCode == mirc.CLIENT_IN_ROOM {
+			c.inRoomHandler(msg.Body)
 		} else if opCode == mirc.CLIENT_LEAVE_ROOM {
 			r := rooms[msg.Body]
 			err := r.removeMember(c.Nick)
@@ -237,6 +272,8 @@ func (c *client) requestHandler() {
 				fmt.Printf("%s says %s\n", c.Nick, msg.Body)
 				c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, m))
 			}
+		} else if opCode == mirc.CLIENT_LIST_MEMBER {
+			c.listMemberHandler(msg.Body)
 		}
 		//daytime := time.Now().String()
 	}
