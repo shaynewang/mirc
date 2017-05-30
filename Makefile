@@ -5,7 +5,7 @@ build:
 	godep go build&&\
 	go install github.com/shaynewang/mirc&&\
 	go build -o bin/server server/server.go&&\
-	go build -o bin/client ui/cui.go
+	go build -o bin/client client/client.go
 
 run_server: build
 	./bin/server
