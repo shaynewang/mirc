@@ -3,11 +3,14 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"strings"
 	"time"
+
+	yaml "gopkg.in/yaml.v2"
 
 	"sync"
 
@@ -16,16 +19,30 @@ import (
 )
 
 // SERVER is the default server ip and port number
-// TODO: use config.yaml file for server ip address
-const SERVER = "127.0.0.1:6667"
 const retries = 3
 const timeout = 20
 const ping = 10
+
+type conf struct {
+	Server string
+}
 
 type client mirc.Client
 
 var currentClient *client
 var currentRoom = "public"
+
+// Get configuration setup from file
+func getConf(config *conf) {
+	configFile, err := ioutil.ReadFile("config.yaml")
+	if err != nil {
+		log.Printf("Cannot open configuration file %v ", err)
+	}
+	err = yaml.Unmarshal(configFile, config)
+	if err != nil {
+		log.Fatalf("Cannot parse configuration file: %v", err)
+	}
+}
 
 // Initialize new client connection
 func newClient(server string) *client {
@@ -45,16 +62,19 @@ func newClient(server string) *client {
 	return &new
 }
 
+// Generate new message object from opcode, receiver nick and message body
 func (c *client) newMsg(opCode int16, receiver string, body string) *mirc.Message {
 	msg := mirc.NewMsg(opCode, receiver, body)
 	msg.Header.Sender = c.Nick
 	return msg
 }
 
+// Generate new message to server from opcode and message body to server
 func (c *client) newServMsg(opCode int16, body string) *mirc.Message {
 	return c.newMsg(opCode, "server", body)
 }
 
+// create new client to server connection
 func newClientConnection(server string) *mirc.Connection {
 	var err error
 	conn, err := net.Dial("tcp", server)
@@ -286,7 +306,11 @@ func (c *client) keepAliveLoop() {
 
 /* ==================================================================================== */
 func main() {
-	currentClient = newClient(SERVER)
+	config := conf{}
+	getConf(&config)
+	//currentClient = newClient(SERVER)
+	fmt.Printf("server: %s\n", config.Server)
+	currentClient = newClient(config.Server)
 	// Initialize Connection
 	currentClient.requestToConnect()
 	go currentClient.keepAliveLoop()
