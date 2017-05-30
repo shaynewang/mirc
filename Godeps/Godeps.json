@@ -1,0 +1,24 @@
+{
+	"ImportPath": "github.com/shaynewang/mirc",
+	"GoVersion": "go1.8",
+	"GodepVersion": "v79",
+	"Packages": [
+		"./ui"
+	],
+	"Deps": [
+		{
+			"ImportPath": "github.com/jroimartin/gocui",
+			"Comment": "v0.3.0-47-g612b0b2",
+			"Rev": "612b0b2987ec1a6af46d7008cef1efd4b3898346"
+		},
+		{
+			"ImportPath": "github.com/mattn/go-runewidth",
+			"Comment": "v0.0.2-3-g97311d9",
+			"Rev": "97311d9f7767e3d6f422ea06661bc2c7a19e8a5d"
+		},
+		{
+			"ImportPath": "github.com/nsf/termbox-go",
+			"Rev": "7994c181db7761ca3c67a217068cf31826113f5f"
+		}
+	]
+}

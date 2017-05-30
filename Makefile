@@ -1,8 +1,17 @@
-all:
+GOPATH := ${PWD}/_vendor:${GOPATH}
+export GOPATH
+
+build:
+	godep go build&&\
 	go install github.com/shaynewang/mirc&&\
-	go build cmd/client/client.go&&\
-	go build cmd/server/server.go&&\
-	go build cmd/ui/cui.go
+	go build -o bin/server server/server.go&&\
+	go build -o bin/client ui/cui.go
+
+run_server: build
+	./bin/server
+
+run_client: build
+	./bin/client
 
 clean:
-	rm client server cui
+	rm bin/*
