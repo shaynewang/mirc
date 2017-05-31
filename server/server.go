@@ -9,6 +9,8 @@ import (
 
 	"errors"
 
+	"sync"
+
 	"github.com/shaynewang/mirc"
 )
 
@@ -17,13 +19,33 @@ const listenPort = ":6667"
 const timeout = 10
 const inactiveTimeout = 30
 
+/******************** types ********************/
 type client mirc.Client
 type room mirc.Room
+type clientList struct {
+	mu   sync.Mutex
+	list map[string]client
+}
+type roomList struct {
+	mu   sync.Mutex
+	list map[string]room
+}
 
-// Mapping of client's nickname to client object
-var activeClients = map[string]client{}
-var rooms = map[string]room{}
+/********************* Globals ******************/
 
+// list of all clients on the server
+var clients = clientList{
+	mu:   sync.Mutex{},
+	list: map[string]client{},
+}
+
+// list of all rooms on the server
+var rooms = roomList{
+	mu:   sync.Mutex{},
+	list: map[string]room{},
+}
+
+/********************** Server funtions *****************/
 // newMsg creates a message object from input parameters
 func newMsg(opCode int16, receiver string, body string) *mirc.Message {
 	msg := mirc.NewMsg(opCode, receiver, body)
@@ -33,9 +55,11 @@ func newMsg(opCode int16, receiver string, body string) *mirc.Message {
 }
 
 // add client to the client list
-func addClient(cnick string, conn net.Conn, clientMap map[string]client) (*client, error) {
-	if _, ok := clientMap[cnick]; ok {
+func addClient(cnick string, conn net.Conn, clients *clientList) (*client, error) {
+	clients.mu.Lock()
+	if _, ok := clients.list[cnick]; ok {
 		//  Cannot add duplicated nickname
+		clients.mu.Unlock()
 		return nil, errors.New("nickname exists")
 	}
 
@@ -45,41 +69,66 @@ func addClient(cnick string, conn net.Conn, clientMap map[string]client) (*clien
 		Timeout: time.Now().Add(time.Second * time.Duration(timeout)),
 		Socket:  &mirc.Connection{conn},
 	}
-	clientMap[cnick] = newClient
-	r := rooms["public"]
+	clients.list[cnick] = newClient
+	clients.mu.Unlock()
+	rooms.mu.Lock()
+	r := rooms.list["public"]
 	r.addMember(cnick)
-	rooms["public"] = r
+	rooms.list["public"] = r
+	rooms.mu.Unlock()
 	fmt.Printf("%s added to %s\n", cnick, r)
 	return &newClient, nil
 }
 
+// remove client from the client list
+func removeClient(nick string, clientMap map[string]client) int {
+	clients.mu.Lock()
+	if _, ok := clientMap[nick]; ok {
+		delete(clientMap, nick)
+	}
+	clients.mu.Unlock()
+	rooms.mu.Lock()
+	for roomName := range rooms.list {
+		r := rooms.list[roomName]
+		r.removeMember(nick)
+		if len(r.Members) > 0 {
+			rooms.list[roomName] = r
+		}
+	}
+	rooms.mu.Unlock()
+	return 0
+}
+
 // create a new room
 func addRoom(roomName string, nick string) error {
-	if _, ok := rooms[roomName]; ok {
+	rooms.mu.Lock()
+	if _, ok := rooms.list[roomName]; ok {
+		rooms.mu.Unlock()
 		return errors.New("room exists")
 	}
-
 	newRoom := room{Name: roomName}
 	newRoom.addMember(nick)
-	rooms[roomName] = newRoom
-	fmt.Printf("room %s created\n", roomName)
+	rooms.list[roomName] = newRoom
+	rooms.mu.Unlock()
 	return nil
-
 }
 
 // add a client to a room
 func (c *client) joinRoom(roomName string) error {
-	if _, ok := rooms[roomName]; !ok {
+	rooms.mu.Lock()
+	if _, ok := rooms.list[roomName]; !ok {
+		rooms.mu.Unlock()
 		return errors.New("room doesn't exist")
 	}
-	r := rooms[roomName]
+	r := rooms.list[roomName]
 	r.addMember(c.Nick)
-	rooms[roomName] = r
+	rooms.list[roomName] = r
+	rooms.mu.Unlock()
 	fmt.Printf("%s is added to %s\n", c.Nick, r)
 	return nil
 }
 
-// add member to a room
+// add member to a room assumes lock is held
 func (r *room) addMember(nick string) error {
 	if contain(r.Members, nick) >= 0 {
 		//  Cannot add duplicated nickname
@@ -93,51 +142,34 @@ func (r *room) addMember(nick string) error {
 		broadCastMsg(newMsg(mirc.SERVER_BROADCAST_MESSAGE, r.Name, m))
 	}
 	return nil
-
 }
 
-// remove member from a room
+// remove member from a room assumes lock is held
 func (r *room) removeMember(nick string) error {
 	i := contain(r.Members, nick)
 	if i >= 0 {
 		r.Members = append(r.Members[:i], r.Members[i+1:]...)
 		if len(r.Members) <= 0 {
-			delete(rooms, r.Name)
+			delete(rooms.list, r.Name)
 			fmt.Printf("empty room %s has been removed\n", r.Name)
-			fmt.Printf("DEBUG: %s\n", rooms)
 		}
 		return nil
 	}
 	//  Cannot delete non member
-	fmt.Printf("DEBUG: member %s removed from %s: %s", nick, r.Name, r.Members)
 	return errors.New("cannot remove memeber")
-
 }
 
-// check if element in list
-func contain(list []string, el string) int {
-	for i, v := range list {
-		if v == el {
-			// Found!
-			return i
-		}
-	}
-	return -1
+// handles client's error messages
+func (c *client) errorHandler() {
+	c.Socket.Conn.Close()
+	removeClient(c.Nick, clients.list)
+	c.Socket.SendMsg(newMsg(mirc.CONNECTION_CLOSED, c.Nick, "server has closed your connection"))
+	fmt.Printf("%s has disconnected\n", c.Nick)
 }
 
 // remove client from the client list
-func removeClient(nick string, clientMap map[string]client) int {
-	if _, ok := clientMap[nick]; ok {
-		delete(clientMap, nick)
-	}
-	for roomName := range rooms {
-		r := rooms[roomName]
-		r.removeMember(nick)
-		if len(r.Members) > 0 {
-			rooms[roomName] = r
-		}
-	}
-	return 0
+func (c *client) removeClientHandler() int {
+	return removeClient(c.Nick, clients.list)
 }
 
 //addRoomHandler
@@ -167,12 +199,32 @@ func (c *client) joinRoomHandler(m *mirc.Message) {
 	return
 }
 
+// handles clent's leave room request
+func (c *client) leaveRoomHandler(m *mirc.Message) {
+	r := rooms.list[m.Body]
+	err := r.removeMember(c.Nick)
+	if err != nil {
+		c.Socket.SendMsg(newMsg(mirc.ERROR, c.Nick, "cannot remove member"))
+	} else {
+		if len(r.Members) > 0 {
+			rooms.list[m.Body] = r
+			msg := m.Header.Sender + " left the room"
+			broadCastMsg(newMsg(mirc.SERVER_BROADCAST_MESSAGE, m.Body, msg))
+		}
+		m := "you have left the room " + m.Body
+		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, m))
+	}
+	return
+}
+
 // list all rooms of client's request
 func (c *client) listRoomHandler() {
 	var roomList []string
-	for name := range rooms {
+	rooms.mu.Lock()
+	for name := range rooms.list {
 		roomList = append(roomList, name)
 	}
+	rooms.mu.Unlock()
 	msgBody := strings.Join(roomList, " ,")
 	c.Socket.SendMsg(newMsg(mirc.SERVER_RPL_LIST_ROOM, c.Nick, msgBody))
 	return
@@ -180,13 +232,16 @@ func (c *client) listRoomHandler() {
 
 // list all members of a room that client's requested
 func (c *client) listMemberHandler(room string) {
-	if _, ok := rooms[room]; !ok {
+	rooms.mu.Lock()
+	if _, ok := rooms.list[room]; !ok {
+		rooms.mu.Unlock()
 		c.Socket.SetWriteDeadline(mirc.CalDeadline(timeout))
 		msgBody := "room " + room + " doesn't exist.\n"
 		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, msgBody))
 		return
 	}
-	msgBody := strings.Join(rooms[room].Members, " ,")
+	msgBody := strings.Join(rooms.list[room].Members, " ,")
+	rooms.mu.Unlock()
 	c.Socket.SendMsg(newMsg(mirc.SERVER_RPL_LIST_MEMBER, c.Nick, msgBody))
 	return
 }
@@ -194,50 +249,56 @@ func (c *client) listMemberHandler(room string) {
 // handles request if client is a member of a room
 // replies with "true" if it's a member and "false" if not a member
 func (c *client) inRoomHandler(room string) {
-	if _, ok := rooms[room]; !ok {
+	rooms.mu.Lock()
+	if _, ok := rooms.list[room]; !ok {
+		rooms.mu.Unlock()
 		c.Socket.SetWriteDeadline(mirc.CalDeadline(timeout))
 		msgBody := "room " + room + " doesn't exist.\n"
 		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, msgBody))
 		return
 	}
-	if contain(rooms[room].Members, c.Nick) < 0 {
+	if contain(rooms.list[room].Members, c.Nick) < 0 {
+		rooms.mu.Unlock()
 		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, "not a member of the room"))
 		return
 	}
+	rooms.mu.Unlock()
 	c.Socket.SendMsg(newMsg(mirc.SERVER_RPL_CLIENT_IN_ROOM, c.Nick, room))
 	return
 }
 
 // server passes rallied message to the receiver
 func rallyMsg(m *mirc.Message) {
-	if _, ok := activeClients[m.Header.Receiver]; !ok {
+	if _, ok := clients.list[m.Header.Receiver]; !ok {
 		msgBody := "Receiver " + m.Header.Receiver + " doesn't exist.\n"
-		activeClients[m.Header.Sender].Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, m.Header.Sender, msgBody))
+		c := clients.list[m.Header.Sender]
+		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, m.Header.Sender, msgBody))
 		return
 	}
 	m.Header.OpCode = mirc.SERVER_TELL_MESSAGE
-	activeClients[m.Header.Receiver].Socket.SendMsg(m)
-	//messageQ = append(messageQ, *m)I
+	c := clients.list[m.Header.Receiver]
+	c.Socket.SendMsg(m)
 	return
 }
 
 // broadCastMsg sends passes message to all members in a room
 func broadCastMsg(m *mirc.Message) {
-	if _, ok := rooms[m.Header.Receiver]; !ok {
+	if _, ok := rooms.list[m.Header.Receiver]; !ok {
 		msgBody := "Room " + m.Header.Receiver + " doesn't exist.\n"
-		activeClients[m.Header.Sender].Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, m.Header.Sender, msgBody))
+		c := clients.list[m.Header.Sender]
+		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, m.Header.Sender, msgBody))
 		return
 	}
-	receiverList := rooms[m.Header.Receiver].Members
+	receiverList := rooms.list[m.Header.Receiver].Members
 	m.Header.OpCode = mirc.SERVER_BROADCAST_MESSAGE
 	for i := 0; i < len(receiverList); i++ {
-		c := receiverList[i]
-		if c != "server" {
-			activeClients[c].Socket.SendMsg(m)
+		cNick := receiverList[i]
+		if cNick != "server" {
+			c := clients.list[cNick]
+			c.Socket.SendMsg(m)
 		}
 	}
 	return
-
 }
 
 // handles requests from clients
@@ -246,21 +307,17 @@ func (c *client) requestHandler() {
 		c.Socket.Conn.SetReadDeadline(mirc.CalDeadline(inactiveTimeout))
 		opCode, msg := c.Socket.GetMsg()
 		if opCode == mirc.ERROR {
-			c.Socket.Conn.Close()
-			removeClient(c.Nick, activeClients)
-			c.Socket.SendMsg(newMsg(mirc.CONNECTION_CLOSED, c.Nick, "server has closed your connection"))
-			fmt.Printf("%s has disconnected\n", c.Nick)
+			c.errorHandler()
 			return
 		}
 		if opCode == mirc.CLIENT_SEND_PUB_MESSAGE {
-			fmt.Printf("%s says %s to %s\n", c.Nick, msg.Body, msg.Header.Receiver)
 			broadCastMsg(msg)
 		} else if opCode == mirc.CLIENT_SEND_MESSAGE {
 			rallyMsg(msg)
 		} else if opCode == mirc.CONNECTION_PING {
 			c.Socket.SendMsg(newMsg(mirc.CONNECTION_ACK, c.Nick, "pong"))
 		} else if opCode == mirc.CONNECTION_CLOSED {
-			removeClient(c.Nick, activeClients)
+			removeClient(c.Nick, clients.list)
 		} else if opCode == mirc.CLIENT_CREATE_ROOM {
 			c.addRoomHandler(msg)
 		} else if opCode == mirc.CLIENT_JOIN_ROOM {
@@ -270,19 +327,7 @@ func (c *client) requestHandler() {
 		} else if opCode == mirc.CLIENT_IN_ROOM {
 			c.inRoomHandler(msg.Body)
 		} else if opCode == mirc.CLIENT_LEAVE_ROOM {
-			r := rooms[msg.Body]
-			err := r.removeMember(c.Nick)
-			if err != nil {
-				c.Socket.SendMsg(newMsg(mirc.ERROR, c.Nick, "cannot remove member"))
-			} else {
-				if len(r.Members) > 0 {
-					rooms[msg.Body] = r
-					m := msg.Header.Sender + " left the room"
-					broadCastMsg(newMsg(mirc.SERVER_BROADCAST_MESSAGE, msg.Body, m))
-				}
-				m := "you have left the room " + msg.Body
-				c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, m))
-			}
+			c.leaveRoomHandler(msg)
 		} else if opCode == mirc.CLIENT_LIST_MEMBER {
 			c.listMemberHandler(msg.Body)
 		}
@@ -304,7 +349,7 @@ func handleConnection(conn net.Conn) {
 	}
 
 	// ask client to change their nickname if it's taken
-	client, err := addClient(nick, conn, activeClients)
+	client, err := addClient(nick, conn, &clients)
 	for err != nil {
 		// If nickname exists then client will be asked
 		// to change
@@ -319,13 +364,13 @@ func handleConnection(conn net.Conn) {
 			con.Conn.Close()
 			return
 		}
-		client, err = addClient(nick, conn, activeClients)
+		client, err = addClient(nick, conn, &clients)
 	}
 	con.Conn.SetWriteDeadline(mirc.CalDeadline(timeout))
 	con.SendMsg(newMsg(mirc.CONNECTION_SUCCESS, nick, "Connection established"))
 
 	fmt.Printf("%s has connected\n", nick)
-	fmt.Printf("ip: %s\n", activeClients[nick].IP)
+	fmt.Printf("ip: %s\n", clients.list[nick].IP)
 	client.requestHandler()
 	fmt.Printf("Client %s has left\n", nick)
 	return
@@ -349,4 +394,17 @@ func main() {
 		}
 		go handleConnection(conn)
 	}
+}
+
+// check if a string is in a list of strings
+// returns the index of the element if it's in the list
+// returns -1 if the element is not in the list
+func contain(list []string, el string) int {
+	for i, v := range list {
+		if v == el {
+			// found it
+			return i
+		}
+	}
+	return -1
 }
