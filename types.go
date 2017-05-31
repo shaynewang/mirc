@@ -39,6 +39,7 @@ type Connection struct {
 type Client struct {
 	IP      net.Addr
 	Nick    string
+	Room    string
 	Timeout time.Time
 	Socket  *Connection
 }

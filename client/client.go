@@ -18,30 +18,14 @@ import (
 	"github.com/shaynewang/mirc"
 )
 
-// SERVER is the default server ip and port number
+// Default parameters
 const retries = 3
 const timeout = 20
 const ping = 10
 
+type client mirc.Client
 type conf struct {
 	Server string
-}
-
-type client mirc.Client
-
-var currentClient *client
-var currentRoom = "public"
-
-// Get configuration setup from file
-func getConf(config *conf) {
-	configFile, err := ioutil.ReadFile("config.yaml")
-	if err != nil {
-		log.Printf("Cannot open configuration file %v ", err)
-	}
-	err = yaml.Unmarshal(configFile, config)
-	if err != nil {
-		log.Fatalf("Cannot parse configuration file: %v", err)
-	}
 }
 
 // Initialize new client connection
@@ -55,6 +39,7 @@ func newClient(server string) *client {
 	con := mirc.Connection{conn}
 	new := client{
 		IP:     conn.LocalAddr(),
+		Room:   "public",
 		Socket: &con,
 	}
 	new.Nick = setNick()
@@ -84,6 +69,40 @@ func newClientConnection(server string) *mirc.Connection {
 	}
 	con := mirc.Connection{conn}
 	return &con
+}
+
+// send request to connect to the server
+func (c *client) requestToConnect() error {
+	var err error
+	for i := 0; i < retries+1; i++ {
+		if i > 0 {
+			fmt.Printf("Retry connecting... (%d/%d)\n", i, retries)
+		}
+		msg := c.newServMsg(mirc.CLIENT_REQUEST_CONNECTION, c.Nick)
+		c.Socket.Conn.SetDeadline(mirc.CalDeadline(timeout))
+		err = c.Socket.SendMsg(msg)
+		if err != nil {
+			fmt.Printf("%s\n", err)
+		} else {
+			// request new nickname if exisit in server
+			c.Socket.Conn.SetDeadline(mirc.CalDeadline(timeout))
+			opCode, msg := c.Socket.GetMsg()
+			if opCode == mirc.CONNECTION_FAILURE {
+				fmt.Printf("Cannot connect: %s\n", msg.Body)
+				c.changeNick(setNick())
+			}
+			fmt.Printf("Connected\n")
+			break
+		}
+	}
+	return err
+}
+
+// closeConnection sends a close connection request to the server
+func (c *client) closeConnection() {
+	reqMsg := c.newServMsg(mirc.CONNECTION_CLOSED, "")
+	c.Socket.SendMsg(reqMsg)
+	return
 }
 
 // Sets nickname locally
@@ -117,33 +136,19 @@ func (c *client) changeNick(nick string) {
 			fmt.Printf("Error: %s\n", msg.Body)
 		}
 	}
+	return
 }
 
-// send request to connect to the server
-func (c *client) requestToConnect() error {
-	var err error
-	for i := 0; i < retries+1; i++ {
-		if i > 0 {
-			fmt.Printf("Retry connecting... (%d/%d)\n", i, retries)
-		}
-		msg := c.newServMsg(mirc.CLIENT_REQUEST_CONNECTION, c.Nick)
-		c.Socket.Conn.SetDeadline(mirc.CalDeadline(timeout))
-		err = c.Socket.SendMsg(msg)
-		if err != nil {
-			fmt.Printf("%s\n", err)
-		} else {
-			// request new nickname if exisit in server
-			c.Socket.Conn.SetDeadline(mirc.CalDeadline(timeout))
-			opCode, msg := c.Socket.GetMsg()
-			if opCode == mirc.CONNECTION_FAILURE {
-				fmt.Printf("Cannot connect: %s\n", msg.Body)
-				c.changeNick(setNick())
-			}
-			fmt.Printf("Connected\n")
-			break
-		}
-	}
-	return err
+// listRoom lists all rooms in the server
+func (c *client) listRoom() error {
+	reqMsg := c.newServMsg(mirc.CLIENT_LIST_ROOM, "")
+	return c.Socket.SendMsg(reqMsg)
+}
+
+// listMember lists all members in a room
+func (c *client) listMember(room string) error {
+	reqMsg := c.newServMsg(mirc.CLIENT_LIST_MEMBER, room)
+	return c.Socket.SendMsg(reqMsg)
 }
 
 // send a request to create a room to server
@@ -157,6 +162,13 @@ func (c *client) createRoom(room string) error {
 func (c *client) joinRoom(room string) error {
 	msg := c.newServMsg(mirc.CLIENT_JOIN_ROOM, room)
 	return c.Socket.SendMsg(msg)
+}
+
+// changeRoom if input room exists in the server and the client is
+// a memeber to that room then change the current room to that
+func (c *client) changeRoom(room string) error {
+	reqMsg := c.newServMsg(mirc.CLIENT_IN_ROOM, room)
+	return c.Socket.SendMsg(reqMsg)
 }
 
 // send a request to leave a room
@@ -173,8 +185,31 @@ func (c *client) sendPrivateMsg(receiver string, msgBody string) error {
 
 // send a private message to a client
 func (c *client) sendPubMsg(msgBody string) error {
-	msg := c.newMsg(mirc.CLIENT_SEND_PUB_MESSAGE, currentRoom, msgBody)
+	msg := c.newMsg(mirc.CLIENT_SEND_PUB_MESSAGE, c.Room, msgBody)
 	return c.Socket.SendMsg(msg)
+}
+
+/*********** Helper functions ************/
+// Get configuration setup from file
+func getConf(config *conf) {
+	configFile, err := ioutil.ReadFile("config.yaml")
+	if err != nil {
+		log.Printf("Cannot open configuration file %v ", err)
+	}
+	err = yaml.Unmarshal(configFile, config)
+	if err != nil {
+		log.Fatalf("Cannot parse configuration file: %v", err)
+	}
+	return
+}
+
+// periodically send ping to the server to notify this client is alive
+func (c *client) keepAliveLoop() {
+	keepAliveMsg := c.newServMsg(mirc.CONNECTION_PING, "ping")
+	for {
+		c.Socket.SendMsg(keepAliveMsg)
+		time.Sleep(ping * time.Second)
+	}
 }
 
 // command parser return command word and message
@@ -189,42 +224,94 @@ func comParser(cmdLine string) (string, string) {
 	return cmd, arg
 }
 
-// listRoom lists all rooms in the server
-func (c *client) listRoom() error {
-	reqMsg := c.newServMsg(mirc.CLIENT_LIST_ROOM, "")
-	return c.Socket.SendMsg(reqMsg)
+/*********** UI functions ************/
+func main() {
+	config := conf{}
+	getConf(&config)
+	fmt.Printf("server: %s\n", config.Server)
+	currentClient := newClient(config.Server)
+	// Initialize Connection
+	currentClient.requestToConnect()
+	go currentClient.keepAliveLoop()
+	g, err := gocui.NewGui(gocui.OutputNormal)
+	if err != nil {
+		log.Panicln(err)
+	}
+	defer g.Close()
+	g.Cursor = true
+	maxX, maxY := g.Size()
+	if lv, err := g.SetView("view", 2, 1, maxX-2, maxY-8); err != nil {
+		if err != gocui.ErrUnknownView {
+			fmt.Printf("Error: %s\n", err)
+		}
+		lv.Title = currentClient.Room
+		lv.Autoscroll = true
+		lv.Wrap = true
+		displayHelp(g)
+	}
+
+	if iv, err := g.SetView("input", 2, maxY-6, maxX-2, maxY-1); err != nil {
+		if err != gocui.ErrUnknownView {
+			fmt.Printf("Error: %s\n", err)
+		}
+		iv.Title = currentClient.Nick
+		iv.Editable = true
+		err = iv.SetCursor(0, 0)
+		_, err = g.SetCurrentView("input")
+		if err != nil {
+			log.Println("Cannot set focus to input view:", err)
+		}
+	}
+	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
+		log.Panicln(err)
+	}
+	if err := g.SetKeybinding("input", gocui.KeyEnter, gocui.ModNone, currentClient.inputFunc); err != nil {
+		log.Panicln(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go g.MainLoop()
+	go currentClient.msgHandlerLoop(g)
+
+	wg.Wait()
+	os.Exit(0)
 }
 
-// changeRoom if input room exists in the server and the client is
-// a memeber to that room then change the current room to that
-func (c *client) changeRoom(room string) error {
-	reqMsg := c.newServMsg(mirc.CLIENT_IN_ROOM, room)
-	return c.Socket.SendMsg(reqMsg)
-}
+// display help message
+func displayHelp(g *gocui.Gui) {
+	g.Execute(func(g *gocui.Gui) error {
+		v, err := g.View("view")
+		if err != nil {
+			return err
+		}
+		helpMsg := "\nUSAGE EXAMPLE:\n" +
+			"create a room:          \\create roomName\n" +
+			"join a room:            \\join roomName\n" +
+			"list all rooms:         \\listRoom\n" +
+			"change current room:    \\changeRoom roomName\n" +
+			"list members of a room: \\listMember roomName\n" +
+			"leave a room:           \\leave roomName\n" +
+			"send private message:   @nick message\n" +
+			"display this message:   \\help\n" +
+			"exit:                   \\exit\n"
 
-// listMember lists all members in a room
-func (c *client) listMember(room string) error {
-	reqMsg := c.newServMsg(mirc.CLIENT_LIST_MEMBER, room)
-	return c.Socket.SendMsg(reqMsg)
-}
-
-// closeConnection sends a close connection request to the server
-func (c *client) closeConnection() {
-	reqMsg := c.newServMsg(mirc.CONNECTION_CLOSED, "")
-	c.Socket.SendMsg(reqMsg)
+		fmt.Fprintf(v, helpMsg)
+		return nil
+	})
+	return
 }
 
 // message handler loop
-func msgHandlerLoop(c *mirc.Connection, g *gocui.Gui) {
+func (c *client) msgHandlerLoop(g *gocui.Gui) {
 	for {
-		msgHandler(c, g)
+		c.msgHandler(g)
 	}
 }
 
 // Handles an incoming message
-func msgHandler(c *mirc.Connection, g *gocui.Gui) int {
-	c.Conn.SetDeadline(mirc.CalDeadline(timeout))
-	opCode, msg := c.GetMsg()
+func (c *client) msgHandler(g *gocui.Gui) int {
+	c.Socket.SetDeadline(mirc.CalDeadline(timeout))
+	opCode, msg := c.Socket.GetMsg()
 
 	if opCode == mirc.ERROR {
 		g.Close()
@@ -278,112 +365,22 @@ func msgHandler(c *mirc.Connection, g *gocui.Gui) int {
 			return nil
 		})
 	} else if opCode == mirc.SERVER_RPL_CLIENT_IN_ROOM {
-		currentRoom = msg.Body
+		c.Room = msg.Body
 		g.Execute(func(g *gocui.Gui) error {
 			v, err := g.View("view")
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(v, "current Room: %s\n", currentRoom)
-			v.Title = currentRoom
+			fmt.Fprintf(v, "current Room: %s\n", c.Room)
+			v.Title = c.Room
 			return nil
 		})
 	}
 	return 0
 }
 
-// periodically send ping to the server to notify this client is alive
-func (c *client) keepAliveLoop() {
-	keepAliveMsg := c.newServMsg(mirc.CONNECTION_PING, "ping")
-	for {
-		c.Socket.SendMsg(keepAliveMsg)
-		time.Sleep(ping * time.Second)
-	}
-}
-
-/* =================================== User Interface specifics ========================================= */
-func main() {
-	config := conf{}
-	getConf(&config)
-	fmt.Printf("server: %s\n", config.Server)
-	currentClient = newClient(config.Server)
-	// Initialize Connection
-	currentClient.requestToConnect()
-	go currentClient.keepAliveLoop()
-	g, err := gocui.NewGui(gocui.OutputNormal)
-	if err != nil {
-		log.Panicln(err)
-	}
-	defer g.Close()
-
-	g.Cursor = true
-
-	//g.SetManagerFunc(layout)
-	maxX, maxY := g.Size()
-	if lv, err := g.SetView("view", 2, 1, maxX-2, maxY-8); err != nil {
-		if err != gocui.ErrUnknownView {
-			fmt.Printf("Error: %s\n", err)
-		}
-		lv.Title = currentRoom
-		lv.Autoscroll = true
-	}
-
-	if iv, err := g.SetView("input", 2, maxY-6, maxX-2, maxY-1); err != nil {
-		if err != gocui.ErrUnknownView {
-			fmt.Printf("Error: %s\n", err)
-		}
-		iv.Title = currentClient.Nick
-		iv.Editable = true
-		err = iv.SetCursor(0, 0)
-		_, err = g.SetCurrentView("input")
-		if err != nil {
-			log.Println("Cannot set focus to input view:", err)
-		}
-	}
-	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
-		log.Panicln(err)
-	}
-	if err := g.SetKeybinding("input", gocui.KeyEnter, gocui.ModNone, inputFunc); err != nil {
-		log.Panicln(err)
-	}
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go g.MainLoop()
-	go msgHandlerLoop(currentClient.Socket, g)
-
-	wg.Wait()
-
-}
-
-// gui layout functions
-func layout(g *gocui.Gui) error {
-	maxX, maxY := g.Size()
-	if lv, err := g.SetView("view", 2, 1, maxX-2, maxY-8); err != nil {
-		if err != gocui.ErrUnknownView {
-			return err
-		}
-		lv.Title = "Messages"
-		lv.Autoscroll = true
-	}
-
-	if iv, err := g.SetView("input", 2, maxY-6, maxX-2, maxY-1); err != nil {
-		if err != gocui.ErrUnknownView {
-			return err
-		}
-		iv.Title = "Input"
-		iv.Editable = true
-		err = iv.SetCursor(0, 0)
-		_, err = g.SetCurrentView("input")
-		if err != nil {
-			log.Println("Cannot set focus to input view:", err)
-		}
-	}
-
-	return nil
-}
-
 // handles commands from user input
-func inputFunc(g *gocui.Gui, iv *gocui.View) error {
+func (c *client) inputFunc(g *gocui.Gui, iv *gocui.View) error {
 	v, _ := g.View("input")
 	cmdLine := iv.ViewBuffer()
 	v.Clear()
@@ -394,35 +391,37 @@ func inputFunc(g *gocui.Gui, iv *gocui.View) error {
 	}
 
 	if cmd == "\\create" { // create a chat room
-		currentClient.createRoom(arg)
+		c.createRoom(arg)
 	} else if cmd == "\\join" { // join a chat room
-		currentClient.joinRoom(arg)
+		c.joinRoom(arg)
 	} else if cmd == "\\listRoom" { // list all char rooms on a server
-		currentClient.listRoom()
+		c.listRoom()
 	} else if cmd == "\\changeRoom" { // change current chat room
-		currentClient.changeRoom(arg)
+		c.changeRoom(arg)
 	} else if cmd == "\\listMember" { // list membership of a room
-		currentClient.listMember(arg)
+		c.listMember(arg)
 	} else if cmd == "\\leave" { // leave room
-		currentClient.leaveRoom(arg)
-		currentRoom = "public"
+		c.leaveRoom(arg)
+		c.Room = "public"
 	} else if cmd[0] == '@' { // Private user message
 		g.Execute(func(g *gocui.Gui) error {
 			v, err := g.View("view")
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(v, "\n%s [PRIVATE] %s: %s\n", mirc.GetTime(), currentClient.Nick, arg)
+			fmt.Fprintf(v, "\n%s [PRIVATE] %s: %s\n", mirc.GetTime(), c.Nick, arg)
 			return nil
 		})
-		currentClient.sendPrivateMsg(cmd[1:], arg)
+		c.sendPrivateMsg(cmd[1:], arg)
+	} else if cmd == "\\help" { // display help info
+		displayHelp(g)
 	} else if cmd == "\\exit" { // exits the client
 		g.Close()
-		currentClient.closeConnection()
+		c.closeConnection()
 		fmt.Printf("Bye!\n")
 		os.Exit(0)
 	} else { // send public message
-		currentClient.sendPubMsg(cmdLine)
+		c.sendPubMsg(cmdLine)
 	}
 
 	return nil

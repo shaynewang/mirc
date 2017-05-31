@@ -342,11 +342,11 @@ func handleConnection(conn net.Conn) {
 	con := mirc.Connection{conn}
 	con.Conn.SetReadDeadline(mirc.CalDeadline(timeout))
 	opCode, msg := con.GetMsg()
-	nick := msg.Body
 	if opCode != 100 {
 		// Silently drop the invalid Connection
 		return
 	}
+	nick := msg.Body
 
 	// ask client to change their nickname if it's taken
 	client, err := addClient(nick, conn, &clients)
