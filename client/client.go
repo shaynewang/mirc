@@ -21,6 +21,7 @@ import (
 // Default parameters
 const retries = 3
 const timeout = 20
+const dialTimeout = 5
 const ping = 10
 
 type client mirc.Client
@@ -30,7 +31,8 @@ type conf struct {
 
 // Initialize new client connection
 func newClient(server string) *client {
-	conn, err := net.Dial("tcp", server)
+	//conn, err := net.Dial("tcp", server)
+	conn, err := net.DialTimeout("tcp", server, dialTimeout*time.Second)
 	if err != nil {
 		log.Printf("ERROR: server %s is not available\n", server)
 		// TODO: add error handleing, maybe ask for new server IP
