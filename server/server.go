@@ -201,10 +201,16 @@ func (c *client) joinRoomHandler(m *mirc.Message) {
 
 // handles clent's leave room request
 func (c *client) leaveRoomHandler(m *mirc.Message) {
+	if len(m.Body) <= 0 {
+		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, "invalid command! please specify room name"))
+		return
+	}
 	r := rooms.list[m.Body]
 	err := r.removeMember(c.Nick)
 	if err != nil {
-		c.Socket.SendMsg(newMsg(mirc.ERROR, c.Nick, "cannot remove member"))
+		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, "not a member of the room"))
+	} else if m.Body == "public" {
+		c.Socket.SendMsg(newMsg(mirc.SERVER_TELL_MESSAGE, c.Nick, "cannot leave public room"))
 	} else {
 		if len(r.Members) > 0 {
 			rooms.list[m.Body] = r
