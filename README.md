@@ -2,6 +2,8 @@
 
 A very lightweight single server IRC application
 
+![pic](https://github.com/shaynewang/mirc/example.png)
+
 * build docker image 
     ``` docker build -t mirc . ```
 * run server container
