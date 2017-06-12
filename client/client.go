@@ -60,19 +60,6 @@ func (c *client) newServMsg(opCode int16, body string) *mirc.Message {
 	return c.newMsg(opCode, "server", body)
 }
 
-// create new client to server connection
-func newClientConnection(server string) *mirc.Connection {
-	var err error
-	conn, err := net.Dial("tcp", server)
-	if err != nil {
-		log.Println(err)
-		// TODO: add error handleing, maybe ask for new server IP
-		os.Exit(-1)
-	}
-	con := mirc.Connection{conn}
-	return &con
-}
-
 // send request to connect to the server
 func (c *client) requestToConnect() error {
 	var err error
