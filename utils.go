@@ -25,15 +25,3 @@ func NewMsg(opCode int16, receiver string, body string) *Message {
 	}
 	return &msg
 }
-
-// Retry wrapped function specified times
-func Retry(retries int, function func() error) error {
-	var err error
-	for i := 0; i < retries; i++ {
-		err = function()
-		if err == nil {
-			return err
-		}
-	}
-	return err
-}
