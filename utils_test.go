@@ -16,7 +16,9 @@ func TestNewMsg(t *testing.T) {
 			Receiver: "fakeNick",
 			MsgLen:   len("fakeMsg"),
 		},
-			Body: "fakeMsg"}}}
+			Body: "fakeMsg"}},
+		{msg: Message{}},
+	}
 
 	for _, test := range tests {
 		testMsg := NewMsg(test.opCode, test.receiver, test.body)
